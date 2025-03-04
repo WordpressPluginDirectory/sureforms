@@ -9,6 +9,7 @@
 namespace SRFM;
 
 use SRFM\Admin\Admin;
+use SRFM\Admin\Analytics;
 use SRFM\API\Block_Patterns;
 use SRFM\Inc\Activator;
 use SRFM\Inc\Admin_Ajax;
@@ -31,7 +32,6 @@ use SRFM\Inc\Global_Settings\Global_Settings;
 use SRFM\Inc\Gutenberg_Hooks;
 use SRFM\Inc\Helper;
 use SRFM\Inc\Lib\SRFM_Nps_Survey;
-use SRFM\Inc\Lib\SRFM_Utm_Analytics;
 use SRFM\Inc\Nps_Notice;
 use SRFM\Inc\Page_Builders\Page_Builders;
 use SRFM\Inc\Post_Types;
@@ -77,7 +77,7 @@ class Plugin_Loader {
 		add_action( 'plugins_loaded', [ $this, 'load_plugin' ], 99 );
 		add_action( 'init', [ $this, 'load_classes' ] );
 		add_action( 'admin_init', [ $this, 'activation_redirect' ] );
-
+		Analytics::get_instance();
 		/**
 		 * The code that runs during plugin activation
 		 */
@@ -290,7 +290,6 @@ class Plugin_Loader {
 		AI_Auth::get_instance();
 		Updater::get_instance();
 		DatabaseRegister::init();
-
 		/**
 		 * Required to add the if check for the class existence to resolve phpstan error,
 		 * as the phpstan configuration ignores the inc/lib directory which gives error
@@ -299,10 +298,6 @@ class Plugin_Loader {
 		if ( class_exists( 'SRFM\Inc\Lib\SRFM_Nps_Survey' ) && ! apply_filters( 'srfm_disable_nps_survey', false ) ) {
 			SRFM_Nps_Survey::get_instance(); // Inits the NPS Survey class for which inits the NPS Survey plugin.
 			Nps_Notice::get_instance(); // Responsible for displaying the NPS Survey: keeping the line out of the check will also work.
-		}
-
-		if ( class_exists( 'SRFM\Inc\Lib\SRFM_Utm_Analytics' ) ) {
-			SRFM_Utm_Analytics::get_instance(); // Inits the UTM Analytics library.
 		}
 
 		/**

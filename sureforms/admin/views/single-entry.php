@@ -145,6 +145,7 @@ class Single_Entry {
 	 * @return void
 	 */
 	protected function add_tooltip( $position, $element_cb, $tooltip_cb ) {
+		$upsell_url = Helper::get_sureforms_website_url( 'pricing', [ 'utm_medium' => 'srfm_entries_management' ] );
 		?>
 		<div class="srfm-tooltip">
 			<?php call_user_func( $element_cb ); ?>
@@ -153,7 +154,7 @@ class Single_Entry {
 					<div class="tooltip-text">
 						<?php call_user_func( $tooltip_cb ); ?>
 					</div>
-					<a target="_blank" href="https://sureforms.com/pricing"><?php esc_html_e( 'Upgrade', 'sureforms' ); ?></a>
+					<a target="_blank" href="<?php echo esc_url( $upsell_url ); ?>"><?php esc_html_e( 'Upgrade', 'sureforms' ); ?></a>
 				</div>
 				<i></i>
 			</div>
@@ -510,6 +511,28 @@ class Single_Entry {
 		</div>
 		<?php
 		$content = ob_get_clean();
-		echo apply_filters( 'srfm_entry_logs_markup', $content, $entry_logs ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+
+		$allowed_tags = array_merge(
+			wp_kses_allowed_html( 'post' ),
+			[
+				'svg'  => [
+					'width'   => true,
+					'height'  => true,
+					'fill'    => true,
+					'viewbox' => true,
+					'xmlns'   => true,
+				],
+				'path' => [
+					'd'               => true,
+					'opacity'         => true,
+					'class'           => true,
+					'stroke-width'    => true,
+					'stroke-linecap'  => true,
+					'stroke-linejoin' => true,
+				],
+			]
+		);
+
+		echo wp_kses( apply_filters( 'srfm_entry_logs_markup', $content, $entry_logs ), $allowed_tags );
 	}
 }

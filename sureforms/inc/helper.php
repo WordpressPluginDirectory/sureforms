@@ -419,7 +419,7 @@ class Helper {
 	 * @return array<mixed> Live preview data.
 	 */
 	public static function get_instant_form_live_data() {
-		$srfm_live_mode_data = isset( $_GET['live_mode'] ) && current_user_can( 'edit_posts' ) ? self::sanitize_recursively( 'sanitize_text_field', wp_unslash( $_GET ) ) : []; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$srfm_live_mode_data = isset( $_GET['live_mode'] ) && current_user_can( 'edit_posts' ) ? self::sanitize_recursively( 'sanitize_text_field', wp_unslash( $_GET ) ) : []; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce verification is not needed here.
 
 		return $srfm_live_mode_data ? array_map(
 			// Normalize falsy values.
@@ -1046,7 +1046,7 @@ class Helper {
 		}
 
 		// Validate a single key-value pair when no conditions are provided.
-		return isset( $_REQUEST[ $key ] ) && $_REQUEST[ $key ] === $value; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Input is validated via strict comparison.
+		return isset( $_REQUEST[ $key ] ) && $_REQUEST[ $key ] === $value; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce verification is not needed here. Input is validated via strict comparison.
 	}
 
 	/**
@@ -1079,5 +1079,69 @@ class Helper {
 		$is_post_type_sureforms_form       = $current_screen && SRFM_FORMS_POST_TYPE === $current_screen->post_type;
 
 		return $is_screen_sureforms_menu || $is_screen_add_new_form || $is_screen_sureforms_form_settings || $is_screen_sureforms_entries || $is_post_type_sureforms_form;
+	}
+
+	/**
+	 * Filters and concatenates valid class names from an array.
+	 *
+	 * @param array<string> $class_names The array containing potential class names.
+	 * @since 1.4.0
+	 * @return string The concatenated string of valid class names separated by spaces.
+	 */
+	public static function join_strings( $class_names ) {
+		// Filter the array to include only valid class names.
+		$valid_class_names = array_filter(
+			$class_names,
+			static function ( $value ) {
+				return is_string( $value ) && '' !== $value && false !== $value;
+			}
+		);
+
+		// Concatenate the valid class names with spaces and return.
+		return implode( ' ', $valid_class_names );
+	}
+	/**
+	 * Get SureForms Website URL.
+	 *
+	 * @param string                $trail The URL trail to append to SureForms website URL. The parameter should not include a leading slash as the base URL already ends with a trailing slash.
+	 * @param array<string, string> $utm_args Optional. An associative array of UTM parameters to append to the URL. Default empty array. Example: [ 'utm_medium' => 'dashboard'].
+	 * @since 0.0.7
+	 * @return string
+	 */
+	public static function get_sureforms_website_url( $trail, $utm_args = [] ) {
+		$url = SRFM_WEBSITE;
+		if ( ! empty( $trail ) && is_string( $trail ) ) {
+			$url = SRFM_WEBSITE . $trail;
+		}
+
+		if ( ! is_array( $utm_args ) ) {
+			$utm_args = [];
+		}
+
+		if ( class_exists( 'BSF_UTM_Analytics' ) ) {
+			$url = \BSF_UTM_Analytics::get_utm_ready_link( $url, 'sureforms', $utm_args );
+		}
+
+		return esc_url( $url );
+	}
+
+	/**
+	 * Validates if the given string is a valid CSS class name.
+	 *
+	 * A valid CSS class name:
+	 * - Does not start with a digit, hyphen, or underscore.
+	 * - Can contain alphanumeric characters, underscores, hyphens, and Unicode letters.
+	 *
+	 * @param string $class_name The class name to validate.
+	 *
+	 * @since 1.3.1
+	 * @return bool True if the class name is valid, otherwise false.
+	 */
+	public static function is_valid_css_class_name( $class_name ) {
+		// Regular expression to validate a Unicode-aware CSS class name.
+		$class_name_regex = '/^[^\d\-_][\w\p{L}\p{N}\-_]*$/u';
+
+		// Check if the className matches the pattern.
+		return preg_match( $class_name_regex, $class_name ) === 1;
 	}
 }

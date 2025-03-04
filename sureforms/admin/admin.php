@@ -61,6 +61,48 @@ class Admin {
 			},
 			1000
 		);
+		// Enfold theme compatibility to enable block editor for SureForms post type.
+		add_filter( 'avf_use_block_editor_for_post', [ $this, 'enable_block_editor_in_enfold_theme' ] );
+
+		// Add action links to the plugin page.
+		add_filter( 'plugin_action_links_' . SRFM_BASENAME, [ $this, 'add_action_links' ] );
+		add_filter( 'wpforms_current_user_can', [ $this, 'disable_wpforms_capabilities' ], 10, 3 );
+	}
+
+	/**
+	 * Show action on plugin page.
+	 *
+	 * @param  array $links links.
+	 * @return array
+	 * @since 1.4.2
+	 */
+	public function add_action_links( $links ) {
+		if ( ! defined( 'SRFM_PRO_FILE' ) && ! file_exists( WP_PLUGIN_DIR . '/sureforms-pro/sureforms-pro.php' ) ) {
+			// Display upsell link if SureForms Pro is not installed.
+			$upsell_link = add_query_arg(
+				[
+					'utm_medium' => 'plugin-list',
+				],
+				Helper::get_sureforms_website_url( 'pricing' )
+			);
+			$links[]     = '<a href="' . esc_url( $upsell_link ) . '" target="_blank" rel="noreferrer" class="sureforms-plugins-go-pro">' . esc_html__( 'Get SureForms Pro', 'sureforms' ) . '</a>';
+		}
+
+		return $links;
+	}
+
+	/**
+	 * Enable block editor in Enfold theme for SureForms post type.
+	 *
+	 * @param bool $use_block_editor Whether to use block editor.
+	 * @since 1.3.1
+	 */
+	public function enable_block_editor_in_enfold_theme( $use_block_editor ) {
+		// if SureForms form post type then return true.
+		if ( SRFM_FORMS_POST_TYPE === get_current_screen()->post_type ) {
+			return true;
+		}
+		return $use_block_editor;
 	}
 
 	/**
@@ -69,9 +111,10 @@ class Admin {
 	 * @since 0.0.10
 	 */
 	public function enable_gutenberg_for_sureforms() {
-
-		// Check if the Classic Editor plugin is active and if it is set to replace the block editor.
-		if ( ! class_exists( 'Classic_Editor' ) || 'block' === get_option( 'classic-editor-replace' ) ) {
+		/**
+		 * Check if the classic editor is enabled from Classic Editor plugin settings or Divi settings.
+		 */
+		if ( 'block' === get_option( 'classic-editor-replace' ) || 'on' === get_option( 'et_enable_classic_editor' ) ) {
 			return;
 		}
 
@@ -234,7 +277,7 @@ class Admin {
 	public function render_entries() {
 		// Render single entry view.
 		// Adding the phpcs ignore nonce verification as no database operations are performed in this function, it is used to display the single entry view.
-		if ( isset( $_GET['entry_id'] ) && is_numeric( $_GET['entry_id'] ) && isset( $_GET['view'] ) && 'details' === $_GET['view'] ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( isset( $_GET['entry_id'] ) && is_numeric( $_GET['entry_id'] ) && isset( $_GET['view'] ) && 'details' === $_GET['view'] ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce verification is not needed here and explained in the comments above as well.
 			$single_entry_view = new Single_Entry();
 			$single_entry_view->render();
 			return;
@@ -330,7 +373,7 @@ class Admin {
 		global $post, $pagenow;
 		$breadcrumbs = [];
 
-		if ( 'admin.php' === $pagenow && isset( $_GET['page'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( 'admin.php' === $pagenow && isset( $_GET['page'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- We don't need nonce verification here.
 			$page_title    = get_admin_page_title();
 			$breadcrumbs[] = [
 				'title' => $page_title,
@@ -345,7 +388,7 @@ class Admin {
 					'link'  => admin_url( 'edit.php?post_type=' . $post_type_obj->name ),
 				];
 
-				if ( 'edit.php' === $pagenow && ! isset( $_GET['page'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+				if ( 'edit.php' === $pagenow && ! isset( $_GET['page'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- We don't need nonce verification here.
 					$breadcrumbs[ count( $breadcrumbs ) - 1 ]['link'] = '';
 				} else {
 					$breadcrumbs[] = [
@@ -383,20 +426,17 @@ class Admin {
 		$current_screen = get_current_screen();
 		global $wp_version;
 
-		$file_prefix  = defined( 'SRFM_DEBUG' ) && SRFM_DEBUG ? '' : '.min';
-			$dir_name = defined( 'SRFM_DEBUG' ) && SRFM_DEBUG ? 'unminified' : 'minified';
-			$js_uri   = SRFM_URL . 'assets/js/' . $dir_name . '/';
-			$css_uri  = SRFM_URL . 'assets/css/' . $dir_name . '/';
+		$file_prefix = defined( 'SRFM_DEBUG' ) && SRFM_DEBUG ? '' : '.min';
+		$dir_name    = defined( 'SRFM_DEBUG' ) && SRFM_DEBUG ? 'unminified' : 'minified';
+		$js_uri      = SRFM_URL . 'assets/js/' . $dir_name . '/';
+		$css_uri     = SRFM_URL . 'assets/css/' . $dir_name . '/';
+		$is_rtl      = is_rtl();
+		$rtl         = $is_rtl ? '-rtl' : '';
 
 		/**
 		 * List of the handles in which we need to add translation compatibility.
 		 */
 		$script_translations_handlers = [];
-
-			/* RTL */
-		if ( is_rtl() ) {
-			$file_prefix .= '-rtl';
-		}
 
 		$localization_data = [
 			'site_url'                => get_site_url(),
@@ -407,7 +447,7 @@ class Admin {
 			'is_pro_active'           => defined( 'SRFM_PRO_VER' ),
 			'pro_plugin_version'      => defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : '',
 			'pro_plugin_name'         => defined( 'SRFM_PRO_VER' ) && defined( 'SRFM_PRO_PRODUCT' ) ? SRFM_PRO_PRODUCT : 'SureForms Pro',
-			'sureforms_pricing_page'  => $this->get_sureforms_website_url( 'pricing' ),
+			'sureforms_pricing_page'  => Helper::get_sureforms_website_url( 'pricing' ),
 			'field_spacing_vars'      => Helper::get_css_vars(),
 			'is_ver_lower_than_6_7'   => version_compare( $wp_version, '6.6.2', '<=' ),
 		];
@@ -463,7 +503,7 @@ class Admin {
 		}
 
 		if ( $is_screen_sureforms_form_settings ) {
-			wp_enqueue_style( SRFM_SLUG . '-settings', $css_uri . 'backend/settings' . $file_prefix . '.css', [], SRFM_VER );
+			wp_enqueue_style( SRFM_SLUG . '-settings', $css_uri . 'backend/settings' . $file_prefix . $rtl . '.css', [], SRFM_VER );
 
 			// if version is equal to or lower than 6.6.2 then add compatibility css.
 			if ( version_compare( $wp_version, '6.6.2', '<=' ) ) {
@@ -489,7 +529,7 @@ class Admin {
 		}
 
 		// Admin Submenu Styles.
-		wp_enqueue_style( SRFM_SLUG . '-admin', $css_uri . 'backend/admin' . $file_prefix . '.css', [], SRFM_VER );
+		wp_enqueue_style( SRFM_SLUG . '-admin', $css_uri . 'backend/admin' . $file_prefix . $rtl . '.css', [], SRFM_VER );
 
 		if ( 'edit-' . SRFM_FORMS_POST_TYPE === $current_screen->id ) {
 			$asset_handle = 'page_header';
@@ -502,7 +542,7 @@ class Admin {
 				'version'      => SRFM_VER,
 			];
 			wp_enqueue_script( SRFM_SLUG . '-form-page-header', SRFM_URL . 'assets/build/' . $asset_handle . '.js', $script_info['dependencies'], SRFM_VER, true );
-			wp_enqueue_style( SRFM_SLUG . '-form-archive-styles', $css_uri . 'form-archive-styles' . $file_prefix . '.css', [], SRFM_VER );
+			wp_enqueue_style( SRFM_SLUG . '-form-archive-styles', $css_uri . 'form-archive-styles' . $file_prefix . $rtl . '.css', [], SRFM_VER );
 
 			$script_translations_handlers[] = SRFM_SLUG . '-form-page-header';
 		}
@@ -540,6 +580,7 @@ class Admin {
 					'site_url'             => get_site_url(),
 					'srfm_import_endpoint' => '/wp-json/sureforms/v1/sureforms_import',
 					'import_form_nonce'    => current_user_can( 'edit_posts' ) ? wp_create_nonce( 'wp_rest' ) : '',
+					'import_btn_string'    => __( 'Import Form', 'sureforms' ),
 				]
 			);
 
@@ -558,17 +599,7 @@ class Admin {
 		}
 
 		if ( $is_screen_add_new_form ) {
-			$file_prefix = defined( 'SRFM_DEBUG' ) && SRFM_DEBUG ? '' : '.min';
-			$dir_name    = defined( 'SRFM_DEBUG' ) && SRFM_DEBUG ? 'unminified' : 'minified';
-
-			$css_uri = SRFM_URL . 'assets/css/' . $dir_name . '/';
-
-			/* RTL */
-			if ( is_rtl() ) {
-				$file_prefix .= '-rtl';
-			}
-
-			wp_enqueue_style( SRFM_SLUG . '-template-picker', $css_uri . 'template-picker' . $file_prefix . '.css', [], SRFM_VER );
+			wp_enqueue_style( SRFM_SLUG . '-template-picker', $css_uri . 'template-picker' . $file_prefix . $rtl . '.css', [], SRFM_VER );
 
 			$sureforms_admin = 'templatePicker';
 
@@ -596,7 +627,7 @@ class Admin {
 					'srfm_ai_usage_details'        => AI_Helper::get_current_usage_details(),
 					'is_pro_license_active'        => AI_Helper::is_pro_license_active(),
 					'srfm_ai_auth_user_email'      => get_option( 'srfm_ai_auth_user_email' ),
-					'pricing_page_url'             => $this->get_sureforms_website_url( 'pricing' ),
+					'pricing_page_url'             => Helper::get_sureforms_website_url( 'pricing' ),
 				]
 			);
 
@@ -713,24 +744,6 @@ class Admin {
 		return $status;
 	}
 
-	/**
-	 * Get SureForms Website URL.
-	 *
-	 * @param string $trail The URL trail to append to SureForms website URL. The parameter should not include a leading slash as the base URL already ends with a trailing slash.
-	 * @since 0.0.7
-	 * @return string
-	 */
-	public static function get_sureforms_website_url( $trail ) {
-		$url = SRFM_WEBSITE;
-		if ( ! empty( $trail ) && is_string( $trail ) ) {
-			$url = SRFM_WEBSITE . $trail;
-		}
-
-		$url = \BSF_UTM_Analytics\Inc\Utils::get_utm_ready_link( $url, 'sureforms' );
-
-		return esc_url( $url );
-	}
-
 	// Entries methods.
 
 	/**
@@ -824,8 +837,31 @@ class Admin {
 
 		if ( ! empty( $message ) ) {
 			// Phpcs ignore comment is required as $message variable is already escaped.
-			echo '<div class="notice notice-warning">' . $message . '</div>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			echo '<div class="notice notice-warning">' . wp_kses_post( $message ) . '</div>';
 		}
 	}
 
+	/**
+	 * Disables the capabilities for WPForms to avoid conflicts when enqueueing
+	 * scripts and styles for WPForms.
+	 *
+	 * This function is intended to prevent any potential conflicts that may arise
+	 * when WPForms scripts and styles are enqueued. By disabling certain capabilities,
+	 * it ensures that WPForms does not interfere with other functionalities.
+	 *
+	 * @param bool $user_can A boolean indicating whether the user has the capability.
+	 * @return bool Returns true if the capabilities are successfully disabled, false otherwise.
+	 * @since 1.4.2
+	 */
+	public function disable_wpforms_capabilities( $user_can ) {
+		// Note: Nonce verification is intentionally omitted here as no database operations are performed.
+		// The values of the $_REQUEST variables are strictly validated, ensuring security without the need for nonce verification.
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$post_id = ! empty( $_REQUEST['post'] ) && ! empty( $_REQUEST['action'] ) ? absint( $_REQUEST['post'] ) : 0;
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$post_type = $post_id ? get_post_type( $post_id ) : sanitize_text_field( wp_unslash( $_REQUEST['post_type'] ?? '' ) );
+		return SRFM_FORMS_POST_TYPE === $post_type ? false : $user_can;
+	}
 }
