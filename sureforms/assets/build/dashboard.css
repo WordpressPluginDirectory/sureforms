@@ -102,6 +102,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .col-start-8{grid-column-start: 8
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .col-start-9{grid-column-start: 9
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .m-0{margin: 0px
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .m-2{margin: 0.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .m-auto{margin: auto
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mx-0{margin-left: 0px;margin-right: 0px
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mx-1{margin-left: 0.25rem;margin-right: 0.25rem
@@ -128,6 +129,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mr-10{margin-right: 2.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mr-2{margin-right: 0.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mr-3{margin-right: 0.75rem
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mr-4{margin-right: 1rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mr-6{margin-right: 1.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mr-7{margin-right: 1.75rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mt-0{margin-top: 0px
@@ -139,6 +141,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mt-2{margin-top: 0.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mt-2\.5{margin-top: 0.625rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mt-6{margin-top: 1.5rem
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mt-\[1\.625rem\]{margin-top: 1.625rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mt-\[2px\]{margin-top: 2px
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .mt-auto{margin-top: auto
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .box-border{box-sizing: border-box
@@ -227,6 +230,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-16{width: 4rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-2{width: 0.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-2\.5{width: 0.625rem
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-20{width: 5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-3{width: 0.75rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-4{width: 1rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-48{width: 12rem
@@ -236,6 +240,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-8{width: 2rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-80{width: 20rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-96{width: 24rem
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-\[128px\]{width: 128px
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-\[16rem\]{width: 16rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-\[18\.5rem\]{width: 18.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-\[215px\]{width: 215px
@@ -259,6 +264,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .min-w-\[calc\(50\%-0\.5rem\)\]{min-width: calc(50% - 0.5rem)
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .min-w-fit{min-width: -moz-fit-content;min-width: fit-content
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .min-w-full{min-width: 100%
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-2xl{max-width: 42rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-32{max-width: 8rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-4xl{max-width: 56rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-64{max-width: 16rem
@@ -271,6 +277,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-full{max-width: 100%
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-md{max-width: 28rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-sm{max-width: 24rem
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-xl{max-width: 36rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-xs{max-width: 20rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .flex-1{flex: 1 1 0%
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .flex-shrink-0{flex-shrink: 0
@@ -551,6 +558,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .p-4{padding: 1rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .p-5{padding: 1.25rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .p-6{padding: 1.5rem
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .p-7{padding: 1.75rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .p-8{padding: 2rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .px-0{padding-left: 0px;padding-right: 0px
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .px-0\.5{padding-left: 0.125rem;padding-right: 0.125rem
@@ -998,6 +1006,7 @@
     }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .md\:col-start-7{grid-column-start: 7
     }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .md\:col-start-8{grid-column-start: 8
     }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .md\:col-start-9{grid-column-start: 9
+    }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .md\:block{display: block
     }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .md\:w-1\/10{width: 10%
     }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .md\:w-1\/11{width: 9.0909091%
     }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .md\:w-1\/12{width: 8.3333333%
@@ -1305,3 +1314,4 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) :is(.\[\&_svg\]\:shrink-0 svg){flex-shrink: 0
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) :is(.\[\&_svg\]\:text-icon-secondary svg){--tw-text-opacity: 1;color: rgb(107 114 128 / var(--tw-text-opacity, 1))
 }
+html:has(>body.sureforms-onboarding-page).wp-toolbar{padding-top:0 !important;box-sizing:border-box}body.sureforms-onboarding-page #wpcontent,body.sureforms-onboarding-page #wpbody{padding:0;margin:0}body.sureforms-onboarding-page #wpadminbar,body.sureforms-onboarding-page #adminmenuwrap,body.sureforms-onboarding-page #adminmenuback,body.sureforms-onboarding-page #wpadminbar,body.sureforms-onboarding-page #wpfooter{display:none}
