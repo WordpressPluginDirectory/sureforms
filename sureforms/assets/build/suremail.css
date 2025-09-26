@@ -600,6 +600,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .pl-3\.5{padding-left: 0.875rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .pl-4{padding-left: 1rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .pl-5{padding-left: 1.25rem
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .pl-7{padding-left: 1.75rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .pl-8{padding-left: 2rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .pl-9{padding-left: 2.25rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .pr-10{padding-right: 2.5rem
@@ -692,6 +693,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .text-support-warning-inverse{--tw-text-opacity: 1;color: rgb(253 224 71 / var(--tw-text-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .text-text-disabled{--tw-text-opacity: 1;color: rgb(209 213 219 / var(--tw-text-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .text-text-inverse{--tw-text-opacity: 1;color: rgb(255 255 255 / var(--tw-text-opacity, 1))
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .text-text-on-button-disabled{--tw-text-opacity: 1;color: rgb(107 114 128 / var(--tw-text-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .text-text-on-color{--tw-text-opacity: 1;color: rgb(255 255 255 / var(--tw-text-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .text-text-primary{--tw-text-opacity: 1;color: rgb(17 24 39 / var(--tw-text-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .text-text-secondary{--tw-text-opacity: 1;color: rgb(75 85 99 / var(--tw-text-opacity, 1))

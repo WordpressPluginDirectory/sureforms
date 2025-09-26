@@ -80,6 +80,13 @@ class Generate_Form_Markup {
 
 		$content = '';
 
+		$active_plugins      = Helper::get_array_value( get_option( 'active_plugins', [] ) );
+		$is_learndash_active = in_array( 'sfwd-lms/sfwd_lms.php', $active_plugins, true );
+
+		if ( $is_learndash_active ) {
+			$do_blocks = true;
+		}
+
 		if ( $post && ! empty( $post->post_content ) ) {
 			if ( ! empty( $do_blocks ) ) {
 				$content = do_blocks( $post->post_content );
@@ -472,9 +479,8 @@ class Generate_Form_Markup {
 				if ( $is_page_break ) {
 					do_action( 'srfm_page_break_pagination', $post, $id );
 				} elseif ( ! apply_filters( 'srfm_use_custom_field_content', false ) ) {
-					// phpcs:ignore
+					// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Content is filtered and sanitized by WordPress core blocks and filters.
 					echo $content;
-					// phpcs:ignoreEnd
 				}
 
 				do_action( 'srfm_after_field_content', $post, $id );
@@ -758,9 +764,9 @@ class Generate_Form_Markup {
 			$smart_tags = new Smart_Tags();
 			// Adding upload_format_type = 'raw' to retrieve urls as comma separated values.
 			$form_data['upload_format_type'] = 'raw';
-			$redirect_url                    = html_entity_decode( $smart_tags->process_smart_tags( $redirect_url, $submission_data, $form_data ) );
+			$redirect_url                    = html_entity_decode( Helper::get_string_value( $smart_tags->process_smart_tags( $redirect_url, $submission_data, $form_data ) ) );
 		}
 
-		return apply_filters( 'srfm_after_submit_redirect_url', $redirect_url );
+		return esc_url( apply_filters( 'srfm_after_submit_redirect_url', $redirect_url ) );
 	}
 }
