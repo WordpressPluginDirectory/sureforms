@@ -40,11 +40,13 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .right-2{right: 0.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .right-3{right: 0.75rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .right-4{right: 1rem
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .right-8{right: 2rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .right-\[-15px\]{right: -15px
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .right-\[calc\(-50\%\+10px\)\]{right: calc(-50% + 10px)
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .right-\[calc\(-50\%\+12px\)\]{right: calc(-50% + 12px)
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .right-\[calc\(-50\%\+14px\)\]{right: calc(-50% + 14px)
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .top-0{top: 0px
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .top-10{top: 2.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .top-2\.5{top: 0.625rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .top-2\/4{top: 50%
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .top-3{top: 0.75rem
@@ -61,6 +63,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .z-\[1\]{z-index: 1
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .z-\[99999999\]{z-index: 99999999
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .z-\[999999\]{z-index: 999999
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .z-\[9999\]{z-index: 9999
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .z-auto{z-index: auto
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .order-1{order: 1
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .order-10{order: 10
@@ -188,6 +191,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .h-\[124px\]{height: 124px
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .h-\[20px\]{height: 20px
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .h-\[280px\]{height: 280px
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .h-\[760px\]{height: 760px
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .h-\[calc\(100\%-3rem\)\]{height: calc(100% - 3rem)
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .h-auto{height: auto
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .h-fit{height: -moz-fit-content;height: fit-content
@@ -229,6 +233,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-10{width: 2.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-11{width: 2.75rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-120{width: 30rem
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-14{width: 3.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-16{width: 4rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-2{width: 0.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .w-2\.5{width: 0.625rem
@@ -276,6 +281,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-\[268px\]{max-width: 268px
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-\[42\.5rem\]{max-width: 42.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-\[43\.5rem\]{max-width: 43.5rem
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-\[80\%\]{max-width: 80%
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-content-container{max-width: 43.5rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-fit{max-width: -moz-fit-content;max-width: fit-content
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .max-w-full{max-width: 100%
@@ -515,6 +521,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-badge-hover-red{--tw-bg-opacity: 1;background-color: rgb(254 226 226 / var(--tw-bg-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-badge-hover-sky{--tw-bg-opacity: 1;background-color: rgb(224 242 254 / var(--tw-bg-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-badge-hover-yellow{--tw-bg-opacity: 1;background-color: rgb(254 249 195 / var(--tw-bg-opacity, 1))
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-black{--tw-bg-opacity: 1;background-color: rgb(0 0 0 / var(--tw-bg-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-border-interactive{--tw-bg-opacity: 1;background-color: rgb(213 68 7 / var(--tw-bg-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-brand-800{--tw-bg-opacity: 1;background-color: rgb(213 68 7 / var(--tw-bg-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-brand-background-50{--tw-bg-opacity: 1;background-color: rgb(255 243 238 / var(--tw-bg-opacity, 1))
@@ -536,6 +543,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-gray-200{--tw-bg-opacity: 1;background-color: rgb(229 231 235 / var(--tw-bg-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-gray-900{--tw-bg-opacity: 1;background-color: rgb(17 24 39 / var(--tw-bg-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-icon-interactive{--tw-bg-opacity: 1;background-color: rgb(213 68 7 / var(--tw-bg-opacity, 1))
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-misc-overlay{background-color: #111827BF
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-misc-progress-background{--tw-bg-opacity: 1;background-color: rgb(229 231 235 / var(--tw-bg-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-overlay-background{background-color: #0f172ab2
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-tab-background{--tw-bg-opacity: 1;background-color: rgb(249 250 251 / var(--tw-bg-opacity, 1))
@@ -547,6 +555,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-tooltip-background-light{--tw-bg-opacity: 1;background-color: rgb(255 255 255 / var(--tw-bg-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-transparent{background-color: transparent
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-white{--tw-bg-opacity: 1;background-color: rgb(255 255 255 / var(--tw-bg-opacity, 1))
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .bg-opacity-50{--tw-bg-opacity: 0.5
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .fill-current{fill: currentColor
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .stroke-icon-primary{stroke: #111827
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) .object-contain{-o-object-fit: contain;object-fit: contain
@@ -958,6 +967,7 @@
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) :is(.group\/switch:hover .group-hover\/switch\:size-5){width: 1.25rem;height: 1.25rem
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) :is(.group\/switch:hover .group-hover\/switch\:border-toggle-on-border){--tw-border-opacity: 1;border-color: rgb(248 165 129 / var(--tw-border-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) :is(.group\/switch:hover .group-hover\/switch\:bg-toggle-off-hover){--tw-bg-opacity: 1;background-color: rgb(209 213 219 / var(--tw-bg-opacity, 1))
+}:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) :is(.group:hover .group-hover\:bg-opacity-80){--tw-bg-opacity: 0.8
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) :is(.group:hover .group-hover\:text-field-input){--tw-text-opacity: 1;color: rgb(75 85 99 / var(--tw-text-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) :is(.group:hover .group-hover\:text-icon-primary){--tw-text-opacity: 1;color: rgb(17 24 39 / var(--tw-text-opacity, 1))
 }:is(#srfm-dashboard-container, #srfm-settings-container, #srfm-page-header, #srfm-dialog-root, #srfm-add-new-form-container, #srfm-suremail-container) :is(.group\/switch:hover .checked\:group-hover\/switch\:border-toggle-on-border:checked){--tw-border-opacity: 1;border-color: rgb(248 165 129 / var(--tw-border-opacity, 1))
