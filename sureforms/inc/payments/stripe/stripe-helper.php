@@ -140,14 +140,14 @@ class Stripe_Helper {
 	 *
 	 * This returns the URL to the SureForms Stripe settings page in the admin.
 	 * As of now, the URL is:
-	 * http://localhost:10008/wp-admin/admin.php?page=sureforms_form_settings&tab=payments-settings
+	 * http://localhost:10008/wp-admin/admin.php?page=sureforms_form_settings&tab=payments-settings&subpage=payment-methods&gateway=stripe
 	 * The site URL is dynamic and will adapt to the current WordPress installation.
 	 *
 	 * @since 2.0.0
 	 * @return string The URL to the Stripe settings page.
 	 */
 	public static function get_stripe_settings_url() {
-		return admin_url( 'admin.php?page=sureforms_form_settings&tab=payments-settings' );
+		return admin_url( 'admin.php?page=sureforms_form_settings&tab=payments-settings&subpage=payment-methods&gateway=stripe' );
 	}
 
 	/**
@@ -644,7 +644,7 @@ class Stripe_Helper {
 		$client_id = 'ca_KOXfLe7jv1m4L0iC4KNEMc5fT8AXWWuL';
 
 		// Use the same redirect URI pattern as checkout-plugins-stripe-woo.
-		$redirect_url        = admin_url( 'admin.php?page=sureforms_form_settings&tab=payments-settings' );
+		$redirect_url        = admin_url( 'admin.php?page=sureforms_form_settings&tab=payments-settings&subpage=payment-methods&gateway=stripe' );
 		$nonce               = wp_create_nonce( 'stripe-connect' );
 		$redirect_with_nonce = add_query_arg( 'srfm_stripe_connect_nonce', $nonce, $redirect_url );
 
@@ -675,6 +675,70 @@ class Stripe_Helper {
 		);
 
 		return rest_ensure_response( [ 'url' => $connect_url ] );
+	}
+
+	/**
+	 * Get the Stripe account ID.
+	 *
+	 * @since 2.5.1
+	 * @return string The Stripe account ID.
+	 */
+	public static function get_stripe_account_id() {
+		$account = self::get_stripe_setting( 'stripe_account_id' );
+		if ( empty( $account ) || ! is_string( $account ) ) {
+			return '';
+		}
+		return $account;
+	}
+
+	/**
+	 * Send payment data to middleware intersect endpoint.
+	 *
+	 * @param string $charge_id Stripe charge ID (ch_xxx format).
+	 * @param string $secret_key Stripe secret key.
+	 * @param string $stripe_account_id Stripe account ID (optional).
+	 * @param string $plugin_name Plugin name (default: 'SureForms').
+	 * @since 2.5.1
+	 * @return void
+	 */
+	public static function intersect_payment( $charge_id, $secret_key = '', $stripe_account_id = '', $plugin_name = 'SureForms' ) {
+		// Validate charge ID format (must be ch_xxx).
+		if ( empty( $charge_id ) || ! preg_match( '/^ch_[a-zA-Z0-9]+$/', $charge_id ) ) {
+			return;
+		}
+
+		if ( empty( $secret_key ) ) {
+			return;
+		}
+
+		// Prepare request data.
+		$request_data = [
+			'plugin_name'    => $plugin_name,
+			'secret_key'     => $secret_key,
+			'transaction_id' => $charge_id,
+			'account_id'     => $stripe_account_id,
+		];
+
+		// Encode and send to middleware.
+		$request_body = wp_json_encode( $request_data );
+		$request_body = is_string( $request_body ) ? $request_body : '';
+		$request_body = base64_encode( $request_body ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+
+		if ( empty( $request_body ) ) {
+			return;
+		}
+
+		// Send to middleware intersect endpoint.
+		wp_remote_post(
+			self::middle_ware_base_url() . 'payment/intersect',
+			[
+				'timeout' => 30,
+				'body'    => $request_body,
+				'headers' => [
+					'Content-Type' => 'application/json',
+				],
+			]
+		);
 	}
 
 	/**

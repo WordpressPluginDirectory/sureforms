@@ -521,10 +521,14 @@ class Generate_Form_Markup {
 				<?php
 				return ob_get_clean();
 			}
+			$get_nonces                      = Helper::get_frontend_nonces();
+			$unique_validation_nonce         = $get_nonces['unique_validation'];
+			$form_submit_nonce               = $get_nonces['form_submit'];
+			$should_update_form_markup_nonce = Helper::should_update_form_markup_nonce();
 
 			?>
 				<form method="post" enctype="multipart/form-data" id="srfm-form-<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" class="srfm-form <?php echo esc_attr( 'sureforms_form' === $post_type ? 'srfm-single-form ' : '' ); ?>"
-				form-id="<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" after-submission="<?php echo esc_attr( $submission_action ); ?>" message-type="<?php echo esc_attr( $confirmation_type ? $confirmation_type : 'same page' ); ?>" success-url="<?php echo esc_attr( $success_url ? $success_url : '' ); ?>" ajaxurl="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-nonce="<?php echo esc_attr( wp_create_nonce( 'unique_validation_nonce' ) ); ?>"
+				form-id="<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" after-submission="<?php echo esc_attr( $submission_action ); ?>" message-type="<?php echo esc_attr( $confirmation_type ? $confirmation_type : 'same page' ); ?>" success-url="<?php echo esc_attr( $success_url ? $success_url : '' ); ?>" ajaxurl="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-nonce="<?php echo esc_attr( $unique_validation_nonce ); ?>" data-submit-nonce="<?php echo esc_attr( $form_submit_nonce ); ?>" data-update-nonce="<?php echo esc_attr( $should_update_form_markup_nonce ? 'yes' : 'no' ); ?>"
 				>
 				<?php
 					wp_nonce_field( 'srfm-form-submit', 'sureforms_form_submit' );
@@ -761,8 +765,19 @@ class Generate_Form_Markup {
 			return $confirmation_message;
 		}
 
-		$form_confirmation = isset( $form_data['form-id'] ) ?
-			get_post_meta( Helper::get_integer_value( $form_data['form-id'] ), '_srfm_form_confirmation' ) : null;
+		$form_id           = isset( $form_data['form-id'] ) ? Helper::get_integer_value( $form_data['form-id'] ) : 0;
+		$form_confirmation = get_post_meta( $form_id, '_srfm_form_confirmation' );
+
+		/**
+		 * Filter the form confirmation data.
+		 * Allows conditional confirmations to override the default confirmation settings.
+		 *
+		 * @param mixed $form_confirmation The form confirmation data from post meta.
+		 * @param int   $form_id The form ID.
+		 * @param array $submission_data The submission data.
+		 * @since 2.4.0
+		 */
+		$form_confirmation = apply_filters( 'srfm_form_confirmation_data', $form_confirmation, $form_id, $submission_data );
 
 		if ( ! is_array( $form_confirmation ) ) {
 			return $confirmation_message;
@@ -808,8 +823,19 @@ class Generate_Form_Markup {
 			return $redirect_url;
 		}
 
-		$form_confirmation = isset( $form_data['form-id'] ) ?
-			get_post_meta( Helper::get_integer_value( $form_data['form-id'] ), '_srfm_form_confirmation' ) : null;
+		$form_id           = isset( $form_data['form-id'] ) ? Helper::get_integer_value( $form_data['form-id'] ) : 0;
+		$form_confirmation = get_post_meta( $form_id, '_srfm_form_confirmation' );
+
+		/**
+		 * Filter the form confirmation data.
+		 * Allows conditional confirmations to override the default confirmation settings.
+		 *
+		 * @param mixed $form_confirmation The form confirmation data from post meta.
+		 * @param int   $form_id The form ID.
+		 * @param array $submission_data The submission data.
+		 * @since 2.4.0
+		 */
+		$form_confirmation = apply_filters( 'srfm_form_confirmation_data', $form_confirmation, $form_id, $submission_data );
 
 		if ( ! is_array( $form_confirmation ) ) {
 			return $redirect_url;

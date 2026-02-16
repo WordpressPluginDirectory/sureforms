@@ -211,6 +211,10 @@ class Gutenberg_Hooks {
 				'is_admin_user'                     => Helper::current_user_can(),
 				'site_url'                          => $site_url,
 				'is_suremails_active'               => is_plugin_active( 'suremails/suremails.php' ),
+				'default_translations'              => [
+					'gdpr_label'           => __( 'I consent to have this website store my submitted information so they can respond to my inquiry.', 'sureforms' ),
+					'dropdown_placeholder' => __( 'Select an option', 'sureforms' ),
+				],
 			]
 		);
 
@@ -282,12 +286,14 @@ class Gutenberg_Hooks {
 			return;
 		}
 
-		$post_content = addslashes( serialize_blocks( $blocks ) );
+		$post_content = serialize_blocks( $blocks );
 
+		// Use wp_slash() to preserve unicode escapes (like \u003c for <) in block attributes.
+		// Without this, wp_update_post() calls wp_unslash() which corrupts these escapes.
 		wp_update_post(
 			[
 				'ID'           => $post_id,
-				'post_content' => $post_content,
+				'post_content' => wp_slash( $post_content ),
 			]
 		);
 	}

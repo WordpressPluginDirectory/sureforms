@@ -76,6 +76,44 @@ class Form_Submit {
 				'permission_callback' => [ $this, 'submit_form_permissions_check' ],
 			]
 		);
+
+		register_rest_route(
+			$this->namespace,
+			'/refresh-nonces',
+			[
+				'methods'             => 'GET',
+				'callback'            => [ $this, 'refresh_nonces' ],
+				'permission_callback' => '__return_true',
+			]
+		);
+	}
+
+	/**
+	 * Refresh frontend nonces for form submission
+	 *
+	 * @return \WP_REST_Response Response with fresh nonces.
+	 * @since 2.5.1
+	 */
+	public function refresh_nonces() {
+		// Check if nonce refresh is allowed.
+		if ( ! Helper::should_update_form_markup_nonce() ) {
+			return rest_ensure_response(
+				[
+					'success' => false,
+					'message' => __( 'Nonce refresh is disabled.', 'sureforms' ),
+				]
+			);
+		}
+
+		// Get fresh nonces from Helper.
+		$nonces = Helper::get_frontend_nonces();
+
+		return rest_ensure_response(
+			[
+				'success' => true,
+				'nonces'  => $nonces,
+			]
+		);
 	}
 
 	/**
@@ -86,9 +124,8 @@ class Form_Submit {
 	 * @return WP_Error|bool
 	 */
 	public function submit_form_permissions_check( $request ) {
-		$nonce = Helper::get_string_value( $request->get_header( 'X-WP-Nonce' ) );
-
-		if ( ! wp_verify_nonce( sanitize_text_field( $nonce ), 'wp_rest' ) ) {
+		$nonce = Helper::get_string_value( $request->get_header( 'X-WP-Submit-Nonce' ) );
+		if ( ! wp_verify_nonce( sanitize_text_field( $nonce ), 'srfm_form_submit' ) ) {
 			wp_send_json_error(
 				[
 					'message' => __( 'Nonce verification failed.', 'sureforms' ),
@@ -259,8 +296,10 @@ class Form_Submit {
 		$form_id = Helper::get_integer_value( $current_form_id );
 		if ( Form_Restriction::is_form_restricted( $form_id ) ) {
 			$form_restriction = Form_Restriction::get_form_restriction_setting( $form_id );
-			// If the form is restricted, return an error response.
-			$form_restriction_message = $form_restriction['message'] ?? Translatable::get_default_form_restriction_message();
+
+			// Get the scheduling state and appropriate message.
+			$scheduling_state         = Form_Restriction::get_form_scheduling_state( $form_restriction );
+			$form_restriction_message = Form_Restriction::get_restriction_message_by_state( $scheduling_state, $form_restriction );
 
 			$form_restriction_message = apply_filters( 'srfm_form_restriction_message', $form_restriction_message, $form_id, $form_restriction );
 
@@ -647,7 +686,15 @@ class Form_Submit {
 			];
 		}
 
-		return $response;
+		/**
+		 * Filter the form submission response.
+		 *
+		 * @param array<mixed> $response The response data.
+		 * @param array<string> $form_data The original form data.
+		 * @param array<mixed> $submission_data The processed submission data.
+		 * @since 2.4.0
+		 */
+		return apply_filters( 'srfm_form_submission_response', $response, $form_data, $submission_data );
 	}
 
 	/**

@@ -68,6 +68,9 @@ class Admin {
 		add_action( 'uag_enable_quick_action_sidebar', [ $this, 'restrict_spectra_quick_action_bar' ] );
 
 		add_action( 'current_screen', [ $this, 'enable_gutenberg_for_sureforms' ], 100 );
+		// Register notices early for React pages (before admin_enqueue_scripts).
+		add_action( 'admin_init', [ $this, 'register_pro_compatibility_notices' ], 5 );
+		// Display notices on traditional WordPress admin pages.
 		add_action( 'admin_notices', [ $this, 'srfm_pro_version_compatibility' ] );
 
 		// This action enqueues translations for NPS Survey library.
@@ -830,17 +833,22 @@ class Admin {
 			'onboarding_redirect'        => isset( $_GET['srfm-activation-redirect'] ), // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce is not required for the activation redirection.
 			'pointer_nonce'              => wp_create_nonce( 'sureforms_pointer_action' ),
 			'general_settings_url'       => admin_url( '/options-general.php' ),
-			'payments'                   => [
-				'stripe_connected'        => Stripe_Helper::is_stripe_connected(),
-				'stripe_mode'             => Stripe_Helper::get_stripe_mode(),
-				'stripe_connect_url'      => Stripe_Helper::get_stripe_settings_url(),
-				'currencies_data'         => Payment_Helper::get_all_currencies_data(),
-				'zero_decimal_currencies' => Payment_Helper::get_zero_decimal_currencies(),
-				'webhook_url'             => Stripe_Helper::get_webhook_url(),
-				'webhook_test_connected'  => Stripe_Helper::is_webhook_configured( 'test', true ),
-				'webhook_live_connected'  => Stripe_Helper::is_webhook_configured( 'live', true ),
-				'is_transaction_present'  => Stripe_Helper::is_transaction_present(),
-			],
+			'payments'                   => apply_filters(
+				'srfm_admin_localize_payments_data',
+				[
+					'stripe_connected'        => Stripe_Helper::is_stripe_connected(),
+					'stripe_mode'             => Stripe_Helper::get_stripe_mode(),
+					'stripe_connect_url'      => Stripe_Helper::get_stripe_settings_url(),
+					'currencies_data'         => Payment_Helper::get_all_currencies_data(),
+					'zero_decimal_currencies' => Payment_Helper::get_zero_decimal_currencies(),
+					'webhook_url'             => Stripe_Helper::get_webhook_url(),
+					'webhook_test_connected'  => Stripe_Helper::is_webhook_configured( 'test', true ),
+					'webhook_live_connected'  => Stripe_Helper::is_webhook_configured( 'live', true ),
+					'is_transaction_present'  => Stripe_Helper::is_transaction_present(),
+					'payment_currency'        => Payment_Helper::get_currency(),
+					'currency_sign_position'  => Payment_Helper::get_currency_sign_position(),
+				]
+			),
 		];
 
 		$is_screen_sureforms_menu          = Helper::validate_request_context( 'sureforms_menu', 'page' );
@@ -914,6 +922,14 @@ class Admin {
 			$asset_handle = '-entries';
 			wp_enqueue_script( SRFM_SLUG . $asset_handle, SRFM_URL . 'assets/build/entries.js', $script_info['dependencies'], SRFM_VER, true );
 
+			wp_localize_script(
+				SRFM_SLUG . $asset_handle,
+				SRFM_SLUG . '_admin',
+				apply_filters(
+					SRFM_SLUG . '_admin_filter',
+					$localization_data
+				)
+			);
 			$script_translations_handlers[] = SRFM_SLUG . $asset_handle;
 		}
 
@@ -933,7 +949,10 @@ class Admin {
 			wp_localize_script(
 				SRFM_SLUG . $asset_handle,
 				SRFM_SLUG . '_admin',
-				$localization_data
+				apply_filters(
+					SRFM_SLUG . '_admin_filter',
+					$localization_data
+				)
 			);
 			wp_enqueue_style( SRFM_SLUG . $asset_handle, SRFM_URL . 'assets/build/forms.css', [], SRFM_VER, 'all' );
 
@@ -1152,6 +1171,53 @@ class Admin {
 		}
 
 		return $status;
+	}
+
+	/**
+	 * Register Pro compatibility notices early for React pages.
+	 *
+	 * This method runs on admin_init (priority 5) to ensure notices are
+	 * registered BEFORE admin_enqueue_scripts, so they're available when
+	 * wp_localize_script runs.
+	 *
+	 * Hooked - admin_init (priority 5)
+	 *
+	 * @return void
+	 * @since 2.5.0
+	 */
+	public function register_pro_compatibility_notices() {
+		// Early exit if Pro is not active, user lacks permissions, or Notice_Manager is unavailable.
+		if ( ! Helper::has_pro() || ! Helper::current_user_can() || ! class_exists( 'SRFM\Admin\Notice_Manager' ) ) {
+			return;
+		}
+
+		// Register version outdated notice for React pages.
+		if ( ! version_compare( SRFM_PRO_VER, SRFM_PRO_RECOMMENDED_VER, '>=' ) ) {
+			$pro_plugin_name        = defined( 'SRFM_PRO_PRODUCT' ) ? SRFM_PRO_PRODUCT : 'SureForms Pro';
+			$react_outdated_message = sprintf(
+				// translators: %1$s: SureForms version, %2$s: SureForms Pro Plugin Name, %3$s: SureForms Pro Version.
+				esc_html__( 'SureForms %1$s requires minimum %2$s %3$s to work properly. Please update to the latest version.', 'sureforms' ),
+				esc_html( SRFM_VER ),
+				esc_html( $pro_plugin_name ),
+				esc_html( SRFM_PRO_RECOMMENDED_VER )
+			);
+
+			\SRFM\Admin\Notice_Manager::register_notice(
+				[
+					'id'      => 'sureforms-pro-version-outdated',
+					'variant' => 'warning',
+					'message' => $react_outdated_message,
+					'actions' => [
+						[
+							'label'   => esc_html__( 'Update Now', 'sureforms' ),
+							'url'     => admin_url( 'update-core.php' ),
+							'variant' => 'primary',
+						],
+					],
+					'pages'   => [ 'all' ],
+				]
+			);
+		}
 	}
 
 	/**
