@@ -8,11 +8,17 @@
 
 namespace SRFM;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit; // Exit if accessed directly.
+}
+
 use SRFM\Admin\Admin;
 use SRFM\Admin\Analytics;
 use SRFM\Admin\Notice_Manager;
 use SRFM\Inc\Abilities\Abilities_Registrar;
 use SRFM\Inc\Activator;
+use SRFM\Inc\Admin\Editor_Nudge;
+use SRFM\Inc\Admin\Html_Form_Detector;
 use SRFM\Inc\Admin_Ajax;
 use SRFM\Inc\AI_Form_Builder\AI_Auth;
 use SRFM\Inc\AI_Form_Builder\AI_Form_Builder;
@@ -20,6 +26,8 @@ use SRFM\Inc\AI_Form_Builder\AI_Helper;
 use SRFM\Inc\AI_Form_Builder\Field_Mapping;
 use SRFM\Inc\Background_Process;
 use SRFM\Inc\Blocks\Register;
+use SRFM\Inc\Compatibility\Multilingual\Multilingual_Manager;
+use SRFM\Inc\Compatibility\Multilingual\String_Collector;
 use SRFM\Inc\Compatibility\Themes\Astra;
 use SRFM\Inc\Create_New_Form;
 use SRFM\Inc\Database\Register as DatabaseRegister;
@@ -33,21 +41,22 @@ use SRFM\Inc\Frontend_Assets;
 use SRFM\Inc\Generate_Form_Markup;
 use SRFM\Inc\Global_Settings\Email_Summary;
 use SRFM\Inc\Global_Settings\Global_Settings;
+use SRFM\Inc\Global_Settings\Global_Settings_Defaults;
 use SRFM\Inc\Gutenberg_Hooks;
 use SRFM\Inc\Helper;
 use SRFM\Inc\Learn;
+// region: form-migration — Phase P1 foundation.
+use SRFM\Inc\Migrator\Bootstrap as Migrator_Bootstrap;
+// endregion: form-migration.
 use SRFM\Inc\Onboarding;
 use SRFM\Inc\Page_Builders\Page_Builders;
 use SRFM\Inc\Payments\Payments;
 use SRFM\Inc\Post_Types;
 use SRFM\Inc\Rest_Api;
 use SRFM\Inc\Single_Form_Settings\Compliance_Settings;
+use SRFM\Inc\Single_Form_Settings\Form_Settings_Api;
 use SRFM\Inc\Smart_Tags;
 use SRFM\Inc\Updater;
-
-if ( ! defined( 'ABSPATH' ) ) {
-	exit; // Exit if accessed directly.
-}
 
 /**
  * Plugin_Loader
@@ -212,7 +221,13 @@ class Plugin_Loader {
 			Admin::get_instance();
 			// phpcs:ignore /** @phpstan-ignore-next-line */ -- Class is loaded dynamically in WordPress
 			Notice_Manager::get_instance();
+			Editor_Nudge::get_instance();
 		}
+		// Always instantiate — script enqueue is self-gated by `allow_load()`,
+		// while the REST endpoint for converting HTML forms must register
+		// outside the admin context (REST dispatch runs with `is_admin()` ===
+		// false, so admin-only instantiation would 404 the endpoint).
+		Html_Form_Detector::get_instance();
 		Payments::get_instance();
 		Duplicate_Form::get_instance();
 		Learn::get_instance();
@@ -268,6 +283,7 @@ class Plugin_Loader {
 			load_textdomain( 'sureforms', $mofile_local );
 		} else {
 			// Load the default language files.
+			// phpcs:ignore PluginCheck.CodeAnalysis.DiscouragedFunctions.load_plugin_textdomainFound -- Fallback when no global/local .mo override is present.
 			load_plugin_textdomain( 'sureforms', false, $lang_dir );
 		}
 	}
@@ -293,14 +309,19 @@ class Plugin_Loader {
 		Generate_Form_Markup::get_instance();
 		Create_New_Form::get_instance();
 		Global_Settings::get_instance();
+		Global_Settings_Defaults::get_instance();
 		Email_Summary::get_instance();
 		Compliance_Settings::get_instance();
+		Form_Settings_Api::get_instance();
 		Events_Scheduler::get_instance();
 		AI_Form_Builder::get_instance();
 		Field_Mapping::get_instance();
 		Background_Process::get_instance();
 		Page_Builders::get_instance();
 		Rest_Api::get_instance();
+		// region: form-migration — Phase P1 foundation.
+		Migrator_Bootstrap::get_instance();
+		// endregion: form-migration.
 		AI_Helper::get_instance();
 		AI_Auth::get_instance();
 		Updater::get_instance();
@@ -310,6 +331,8 @@ class Plugin_Loader {
 		Abilities_Registrar::get_instance();
 		// Initializing Compatibilities.
 		Astra::get_instance();
+		Multilingual_Manager::get_instance();
+		String_Collector::get_instance();
 
 		/**
 		 * Load core files necessary for the Spectra block.

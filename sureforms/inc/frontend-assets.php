@@ -9,6 +9,7 @@
 
 namespace SRFM\Inc;
 
+use SRFM\Inc\Compatibility\Multilingual\String_Translator;
 use SRFM\Inc\Traits\Get_Instance;
 use SRFM\Inc\Payments\Payment_Helper;
 use SRFM\Inc\Payments\Stripe\Stripe_Helper;
@@ -123,21 +124,31 @@ class Frontend_Assets {
 			}
 		}
 
+		$validation_messages = array_merge(
+			Translatable::get_frontend_validation_messages(),
+			[
+				'srfm_turnstile_error_message'      => __( 'Turnstile sitekey verification failed. Please contact your site administrator.', 'sureforms' ),
+				'srfm_google_captcha_error_message' => __( 'Google Captcha sitekey verification failed. Please contact your site administrator.', 'sureforms' ),
+				'srfm_captcha_h_error_message'      => __( 'HCaptcha sitekey verification failed. Please contact your site administrator.', 'sureforms' ),
+			]
+		);
+
+		// Translate each validation message through the active provider so
+		// admin-supplied translations from WPML String Translation win over the
+		// .mo-file fallback. When no provider is active, this is a pass-through.
+		$validation_messages = String_Translator::get_instance()->translate_validation_messages( $validation_messages );
+
 		wp_localize_script(
 			SRFM_SLUG . '-form-submit',
 			SRFM_SLUG . '_submit',
 			[
-				'site_url' => site_url(),
-				'nonce'    => wp_create_nonce( 'wp_rest' ),
-				'messages' => array_merge(
-					Translatable::get_frontend_validation_messages(),
-					[
-						'srfm_turnstile_error_message' => __( 'Turnstile sitekey verification failed. Please contact your site administrator.', 'sureforms' ),
-						'srfm_google_captcha_error_message' => __( 'Google Captcha sitekey verification failed. Please contact your site administrator.', 'sureforms' ),
-						'srfm_captcha_h_error_message' => __( 'HCaptcha sitekey verification failed. Please contact your site administrator.', 'sureforms' ),
-					]
-				),
-				'is_rtl'   => $is_rtl,
+				'site_url'          => site_url(),
+				'nonce'             => wp_create_nonce( 'wp_rest' ),
+				'messages'          => $validation_messages,
+				'is_rtl'            => $is_rtl,
+				// Resolved RFC 5321 email limits so the client honors the
+				// srfm_email_field_char_limits filter instead of hardcoding 64/255.
+				'email_char_limits' => Field_Validation::get_email_char_limits(),
 			]
 		);
 
@@ -150,7 +161,8 @@ class Frontend_Assets {
 
 			if ( $load_assets ) {
 				// Load needed styles in head tag if current requested page has SureForms form.
-				self::enqueue_scripts_and_styles();
+				// Skip the SureForms stylesheets when every form on the page has default styling disabled.
+				self::enqueue_scripts_and_styles( Form_Styling::should_skip_frontend_styles( $current_post ) );
 			}
 		}
 	}
@@ -158,19 +170,25 @@ class Frontend_Assets {
 	/**
 	 * Enqueue scripts and styles.
 	 *
+	 * @param bool $skip_form_styles When true, the SureForms stylesheets are not enqueued
+	 *                               (default styling disabled for the form). External library
+	 *                               styles and scripts are always loaded so advanced fields
+	 *                               like Dropdown and Phone keep working.
 	 * @return void
 	 * @since 0.0.11
 	 */
-	public static function enqueue_scripts_and_styles() {
+	public static function enqueue_scripts_and_styles( $skip_form_styles = false ) {
 		// Load the styles.
-		foreach ( self::$css_assets as $handle => $path ) {
+		if ( ! $skip_form_styles ) {
+			foreach ( self::$css_assets as $handle => $path ) {
 
-			// Skip single form styles if not on single form page.
-			if ( 'single' === $handle && ! is_singular( SRFM_FORMS_POST_TYPE ) ) {
-				continue;
+				// Skip single form styles if not on single form page.
+				if ( 'single' === $handle && ! is_singular( SRFM_FORMS_POST_TYPE ) ) {
+					continue;
+				}
+
+				wp_enqueue_style( SRFM_SLUG . '-' . $handle );
 			}
-
-			wp_enqueue_style( SRFM_SLUG . '-' . $handle );
 		}
 
 		// Load the external styles. Like Phone and Tom Select.
@@ -258,6 +276,18 @@ class Frontend_Assets {
 					$block_dependencies = [ SRFM_SLUG . "-{$block_name}-intl-input-deps" ];
 				}
 				wp_enqueue_script( SRFM_SLUG . "-{$block_name}", $js_uri . $block_name . $file_prefix . '.js', $block_dependencies, SRFM_VER, true );
+
+				if ( 'phone' === $block_name ) {
+					// Geo-country endpoint for per-visitor auto country detection.
+					// Built with rest_url() so it is correct regardless of permalink structure.
+					wp_localize_script(
+						SRFM_SLUG . "-{$block_name}",
+						'srfm_phone_data',
+						[
+							'geo_endpoint' => esc_url_raw( rest_url( 'sureforms/v1/geo-country' ) ),
+						]
+					);
+				}
 			}
 
 			if ( 'input' === $block_name && isset( $attr['inputMask'] ) && 'none' !== $attr['inputMask'] ) {
@@ -272,6 +302,25 @@ class Frontend_Assets {
 				wp_enqueue_style( SRFM_SLUG . '-quill-editor', $css_vendor_uri . 'quill/quill.snow.css', [], SRFM_VER );
 
 				wp_enqueue_script( SRFM_SLUG . '-textarea', $js_uri . 'textarea' . $file_prefix . '.js', [], SRFM_VER, true );
+
+				wp_localize_script(
+					SRFM_SLUG . '-textarea',
+					'srfm_quill_i18n',
+					[
+						'normal'     => _x( 'Normal', 'Quill heading picker: default paragraph style', 'sureforms' ),
+						'heading_1'  => __( 'Heading 1', 'sureforms' ),
+						'heading_2'  => __( 'Heading 2', 'sureforms' ),
+						'heading_3'  => __( 'Heading 3', 'sureforms' ),
+						'heading_4'  => __( 'Heading 4', 'sureforms' ),
+						'heading_5'  => __( 'Heading 5', 'sureforms' ),
+						'heading_6'  => __( 'Heading 6', 'sureforms' ),
+						'visit_url'  => _x( 'Visit URL:', 'Quill link tooltip label', 'sureforms' ),
+						'enter_link' => _x( 'Enter link:', 'Quill link tooltip label', 'sureforms' ),
+						'edit'       => _x( 'Edit', 'Quill link tooltip action', 'sureforms' ),
+						'save'       => _x( 'Save', 'Quill link tooltip action', 'sureforms' ),
+						'remove'     => _x( 'Remove', 'Quill link tooltip action', 'sureforms' ),
+					]
+				);
 			}
 		}
 		/**
@@ -314,13 +363,11 @@ class Frontend_Assets {
 			);
 
 			// Localize script for Stripe payment functionality.
-			$frontend_nonces = Helper::get_frontend_nonces();
 			wp_localize_script(
 				SRFM_SLUG . '-stripe-payment',
 				'srfm_ajax',
 				[
-					'ajax_url'      => admin_url( 'admin-ajax.php' ),
-					'payment_nonce' => $frontend_nonces['payment_nonce'],
+					'ajax_url' => admin_url( 'admin-ajax.php' ),
 				]
 			);
 

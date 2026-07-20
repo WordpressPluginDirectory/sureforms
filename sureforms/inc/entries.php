@@ -358,7 +358,7 @@ class Entries {
 			$csv_filepath = $temp_dir . $csv_filename;
 
 			if ( file_exists( $csv_filepath ) ) {
-				unlink( $csv_filepath );
+				wp_delete_file( $csv_filepath );
 			}
 
 			$stream = fopen( $csv_filepath, 'wb' ); // phpcs:ignore -- Using fopen to decrease the memory use.
@@ -399,7 +399,7 @@ class Entries {
 			// Clean up CSV files.
 			foreach ( $csv_files as $csv_file ) {
 				if ( file_exists( $csv_file ) ) {
-					unlink( $csv_file );
+					wp_delete_file( $csv_file );
 				}
 			}
 
@@ -575,24 +575,74 @@ class Entries {
 				];
 			}
 
-			if ( count( $date_conditions ) > 1 ) {
+			if ( ! empty( $date_conditions ) ) {
 				$where_conditions[] = $date_conditions;
 			}
 		}
 
-		// Filter by search (entry ID only).
-		if ( ! empty( $args['search'] ) ) {
-			$search_term        = Helper::get_integer_value( $args['search'] );
-			$where_conditions[] = [
-				[
+		// Filter by search (entry ID + form title).
+		if ( ! empty( $args['search'] ) && is_string( $args['search'] ) ) {
+			$search_term  = sanitize_text_field( $args['search'] );
+			$search_group = [ 'RELATION' => 'OR' ];
+
+			// If numeric, match entry ID.
+			if ( is_numeric( $search_term ) ) {
+				$search_group[] = [
 					'key'     => 'ID',
 					'compare' => '=',
-					'value'   => $search_term,
-				],
-			];
+					'value'   => absint( $search_term ),
+				];
+			}
+
+			// Match form titles.
+			$matching_form_ids = self::get_form_ids_by_title( $search_term );
+			if ( ! empty( $matching_form_ids ) ) {
+				$search_group[] = [
+					'key'     => 'form_id',
+					'compare' => 'IN',
+					'value'   => $matching_form_ids,
+				];
+			}
+
+			// Only add if we have search conditions, otherwise force empty result.
+			if ( count( $search_group ) > 1 ) {
+				$where_conditions[] = $search_group;
+			} else {
+				$where_conditions[] = [
+					[
+						'key'     => 'ID',
+						'compare' => '=',
+						'value'   => 0,
+					],
+				];
+			}
 		}
 
 		return $where_conditions;
+	}
+
+	/**
+	 * Get form IDs whose title matches the search term.
+	 *
+	 * @param string $search_term Search term to match against form titles.
+	 *
+	 * @since 2.6.0
+	 * @return array<int> Array of matching form IDs.
+	 */
+	private static function get_form_ids_by_title( $search_term ) {
+		$forms = get_posts(
+			[
+				'post_type'      => SRFM_FORMS_POST_TYPE,
+				'post_status'    => 'any',
+				's'              => $search_term,
+				'search_columns' => [ 'post_title' ],
+				'posts_per_page' => 100,
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+			]
+		);
+
+		return ! empty( $forms ) ? array_map( 'absint', $forms ) : [];
 	}
 
 	/**
@@ -706,7 +756,7 @@ class Entries {
 
 			foreach ( $block_key_map as $srfm_key ) {
 				$field_value = $form_data[ $srfm_key ] ?? '';
-				$row[]       = self::normalize_field_values( $field_value, $srfm_key );
+				$row[]       = self::escape_csv_formula( self::normalize_field_values( $field_value, $srfm_key ) );
 			}
 
 			fputcsv( $stream, $row ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fputcsv
@@ -759,6 +809,45 @@ class Entries {
 			return implode( ', ', array_map( 'sanitize_text_field', $field_value ) );
 		}
 
+		// Textarea fields contain intentional line breaks — use sanitize_textarea_field()
+		// to preserve them. sanitize_text_field() strips newlines, flattening multi-line
+		// content in the CSV export.
+		if ( str_contains( $field_key, 'srfm-textarea' ) ) {
+			return sanitize_textarea_field( Helper::get_string_value( $field_value ) );
+		}
+
 		return sanitize_text_field( Helper::get_string_value( $field_value ) );
+	}
+
+	/**
+	 * Neutralize CSV formula/macro injection in an exported cell.
+	 *
+	 * Spreadsheet applications (Excel, Google Sheets, LibreOffice) interpret a
+	 * cell whose value begins with `=`, `+`, `-`, `@`, a tab, or a carriage
+	 * return as a formula and may execute it when an admin opens the export.
+	 * A submitter could store `=HYPERLINK(...)` or `=cmd|...` in a field and
+	 * have it run on the admin's machine. Prefixing such values with a single
+	 * quote forces the spreadsheet to treat them as literal text.
+	 *
+	 * Well-formed numbers (including negative and decimal values) are returned
+	 * unchanged so numeric columns remain numeric in the spreadsheet.
+	 *
+	 * @param string $value Cell value (already normalized for CSV).
+	 *
+	 * @since 2.10.0
+	 * @return string Safe cell value.
+	 */
+	private static function escape_csv_formula( $value ) {
+		$value = Helper::get_string_value( $value );
+
+		if ( '' === $value || is_numeric( $value ) ) {
+			return $value;
+		}
+
+		if ( in_array( $value[0], [ '=', '+', '-', '@', "\t", "\r" ], true ) ) {
+			return "'" . $value;
+		}
+
+		return $value;
 	}
 }

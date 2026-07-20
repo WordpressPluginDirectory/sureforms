@@ -90,6 +90,15 @@ class Translatable {
 			'srfm_confirm_email_same'          => __( 'Confirmation email does not match.', 'sureforms' ),
 			'srfm_valid_email'                 => __( 'Enter a valid email address.', 'sureforms' ),
 
+			/* translators: %s represents the minimum number of characters required */
+			'srfm_textarea_min_chars'          => __( 'Please enter at least %s characters.', 'sureforms' ),
+
+			/* translators: %s: maximum characters allowed before the @ symbol. */
+			'srfm_email_local_max_length'      => __( 'The part before @ may not exceed %s characters.', 'sureforms' ),
+
+			/* translators: %s: maximum characters allowed after the @ symbol. */
+			'srfm_email_domain_max_length'     => __( 'The part after @ may not exceed %s characters.', 'sureforms' ),
+
 			/* translators: %s represents the minimum acceptable value */
 			'srfm_input_min_value'             => __( 'Minimum value is %s.', 'sureforms' ),
 
@@ -107,6 +116,36 @@ class Translatable {
 
 			/* translators: %s represents the maximum number of options that can be selected */
 			'srfm_multi_choice_max_selections' => __( 'You can select up to %s options.', 'sureforms' ),
+		];
+	}
+
+	/**
+	 * Source (untranslated) versions of every dynamic validation message.
+	 *
+	 * Used by the multilingual integration to register a stable English key with
+	 * the active provider (e.g., WPML String Translation) regardless of the
+	 * site's current WP locale. The keys match {@see dynamic_messages()}; the
+	 * values are the raw English source strings without any `__()` wrapping,
+	 * so they don't shift when the site locale changes.
+	 *
+	 * @since 2.11.0
+	 * @return array<string, string>
+	 */
+	public static function dynamic_messages_source() {
+		return [
+			'srfm_valid_phone_number'          => 'Enter a valid phone number.',
+			'srfm_valid_url'                   => 'Enter a valid URL.',
+			'srfm_confirm_email_same'          => 'Confirmation email does not match.',
+			'srfm_valid_email'                 => 'Enter a valid email address.',
+			'srfm_textarea_min_chars'          => 'Please enter at least %s characters.',
+			'srfm_email_local_max_length'      => 'The part before @ may not exceed %s characters.',
+			'srfm_email_domain_max_length'     => 'The part after @ may not exceed %s characters.',
+			'srfm_input_min_value'             => 'Minimum value is %s.',
+			'srfm_input_max_value'             => 'Maximum value is %s.',
+			'srfm_dropdown_min_selections'     => 'Select at least %s options.',
+			'srfm_dropdown_max_selections'     => 'You can select up to %s options.',
+			'srfm_multi_choice_min_selections' => 'Select at least %s options.',
+			'srfm_multi_choice_max_selections' => 'You can select up to %s options.',
 		];
 	}
 

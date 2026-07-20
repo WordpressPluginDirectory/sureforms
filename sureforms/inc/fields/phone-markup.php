@@ -86,6 +86,33 @@ class Phone_Markup extends Base {
 		$this->country_filter_type   = $attributes['countryFilterType'] ?? 'include';
 		$this->include_countries     = $attributes['includeCountries'] ?? [];
 		$this->exclude_countries     = $attributes['excludeCountries'] ?? [];
+
+		// When auto country is enabled, resolve a best-effort country here at render
+		// time to seed the baked `default-country` attribute (a sensible flag before
+		// any JS runs). The authoritative per-visitor detection happens client-side:
+		// phone.js applies an immediate network-free Intl guess and then refines it
+		// from the same-origin geo-country REST endpoint — so it stays correct even on
+		// full-page-cached sites, where this baked value would otherwise be the first
+		// visitor's country.
+		//
+		// Why not get_locale()?
+		// WordPress get_locale() returns the *site's* configured language (e.g. 'en_US'),
+		// not the visitor's physical location. A site set to English would show 'US' for
+		// every visitor worldwide — defeating the purpose of auto-country detection.
+		//
+		// Why resolve server-side at all (vs. a browser geo-IP fetch)?
+		// A client-side fetch('https://ipapi.co/json') caused CORS failures, 429 rate
+		// limits on high-traffic sites, and exposed visitor IPs to a third party from the
+		// browser. The server path (CDN header first, then a capped, cached ipapi.co
+		// lookup in Helper::get_geo_country()) avoids all three.
+		if ( $this->auto_country ) {
+			// Pass the configured default as the fallback so a detection failure
+			// degrades to the user's chosen country instead of a hardcoded 'us'.
+			$fallback              = ! empty( $this->default_country ) && is_string( $this->default_country )
+				? strtolower( $this->default_country )
+				: 'us';
+			$this->default_country = Helper::get_geo_country( $fallback );
+		}
 		$this->set_unique_slug();
 		$this->set_field_name( $this->unique_slug );
 		$this->set_markup_properties( $this->input_label, true );
@@ -112,8 +139,10 @@ class Phone_Markup extends Base {
 					<?php echo ! empty( $this->aria_described_by ) ? "aria-describedby='" . esc_attr( trim( $this->aria_described_by ) ) . "'" : ''; ?>
 					data-required="<?php echo esc_attr( $this->data_require_attr ); ?>"
 					aria-required="<?php echo esc_attr( $this->data_require_attr ); ?>"
-					auto-country="<?php echo esc_attr( $this->auto_country ? 'true' : 'false' ); ?>"
 					default-country="<?php echo esc_attr( $this->default_country ); ?>"
+					<?php if ( $this->auto_country ) { ?>
+						data-auto-country="true"
+					<?php } ?>
 					<?php if ( $this->enable_country_filter ) { ?>
 						data-enable-country-filter="true"
 						data-country-filter-type="<?php echo esc_attr( $this->country_filter_type ); ?>"
@@ -134,4 +163,5 @@ class Phone_Markup extends Base {
 		<?php
 		return ob_get_clean();
 	}
+
 }

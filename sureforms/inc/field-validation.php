@@ -67,6 +67,9 @@ class Field_Validation {
 				case 'srfm/number':
 					$processed_config = self::process_number_block( $block['attrs'] );
 					break;
+				case 'srfm/textarea':
+					$processed_config = self::process_textarea_block( $block['attrs'] );
+					break;
 			}
 
 			// If block was processed, store its configuration.
@@ -91,9 +94,14 @@ class Field_Validation {
 			}
 		}
 
-		// Only update meta if we have processed configurations.
+		// Sync the meta on every save. When $block_config is empty (e.g. a textarea
+		// whose minLength was cleared, with no other blocks needing per-block
+		// validation), we must clear the stored meta — otherwise the previously
+		// saved values keep being used by the validator.
 		if ( ! empty( $block_config ) ) {
 			update_post_meta( $form_id, '_srfm_block_config', $block_config );
+		} else {
+			delete_post_meta( $form_id, '_srfm_block_config' );
 		}
 	}
 
@@ -273,11 +281,88 @@ class Field_Validation {
 					$not_valid_fields[ $key ] = $field_validated['error'] ?? __( 'Field is not valid.', 'sureforms' );
 				}
 			}
+
+			// Textarea minimum character server-side validation.
+			if ( 'srfm-textarea' === $get_field_name && is_string( $value ) && '' !== $value ) {
+				$block_config = isset( $get_form_config[ $extracted_id ] ) && is_array( $get_form_config[ $extracted_id ] ) ? $get_form_config[ $extracted_id ] : [];
+				$min_length   = isset( $block_config['min_length'] ) ? absint( $block_config['min_length'] ) : 0;
+				if ( $min_length > 0 && mb_strlen( $value ) < $min_length ) {
+					$dynamic_messages  = Translatable::dynamic_validation_messages();
+					$min_chars_message = isset( $dynamic_messages['srfm_textarea_min_chars'] ) && is_string( $dynamic_messages['srfm_textarea_min_chars'] ) && '' !== $dynamic_messages['srfm_textarea_min_chars']
+						? $dynamic_messages['srfm_textarea_min_chars']
+						/* translators: %s represents the minimum number of characters required */
+						: __( 'Please enter at least %s characters.', 'sureforms' );
+					$not_valid_fields[ $key ] = sprintf( $min_chars_message, $min_length );
+				}
+			}
+
+			// Email field RFC 5321 length limits (local part / domain), overridable via filter.
+			// Only the main email value is in form data (the confirm input has no `name`),
+			// so the server validates that value; the client mirrors this for both inputs.
+			// Split on the LAST @ per RFC 5321 so the local part may contain a quoted @.
+			$at_pos = is_string( $value ) && '' !== $value ? strrpos( $value, '@' ) : false;
+			if ( 'srfm-email' === $get_field_name && is_string( $value ) && false !== $at_pos ) {
+				$email_limits = self::get_email_char_limits();
+				$local_max    = $email_limits['local'];
+				$domain_max   = $email_limits['domain'];
+				$local_len    = mb_strlen( substr( $value, 0, $at_pos ) );
+				$domain_len   = mb_strlen( substr( $value, $at_pos + 1 ) );
+
+				$dynamic_messages = Translatable::dynamic_validation_messages();
+				if ( $local_max > 0 && $local_len > $local_max ) {
+					$local_message = isset( $dynamic_messages['srfm_email_local_max_length'] ) && is_string( $dynamic_messages['srfm_email_local_max_length'] ) && '' !== $dynamic_messages['srfm_email_local_max_length']
+						? $dynamic_messages['srfm_email_local_max_length']
+						/* translators: %s: maximum characters allowed before the @ symbol. */
+						: __( 'The part before @ may not exceed %s characters.', 'sureforms' );
+					$not_valid_fields[ $key ] = sprintf( $local_message, $local_max );
+				} elseif ( $domain_max > 0 && $domain_len > $domain_max ) {
+					$domain_message = isset( $dynamic_messages['srfm_email_domain_max_length'] ) && is_string( $dynamic_messages['srfm_email_domain_max_length'] ) && '' !== $dynamic_messages['srfm_email_domain_max_length']
+						? $dynamic_messages['srfm_email_domain_max_length']
+						/* translators: %s: maximum characters allowed after the @ symbol. */
+						: __( 'The part after @ may not exceed %s characters.', 'sureforms' );
+					$not_valid_fields[ $key ] = sprintf( $domain_message, $domain_max );
+				}
+			}
 		}
 
 		// Return the array of invalid fields and their error messages.
 		// Example: [ 'srfm-email-c867d9d9-lbl-email' => 'This field is required.' ].
 		return $not_valid_fields;
+	}
+
+	/**
+	 * Resolve the Email field character limits (RFC 5321), split on the last @.
+	 *
+	 * Single source of truth shared by the server validation and the limits localized to the
+	 * frontend script, so a filter override applies consistently to both.
+	 *
+	 * @return array{local:int,domain:int} Resolved limits. A value of 0 disables that check.
+	 * @since 2.12.1
+	 */
+	public static function get_email_char_limits() {
+		/**
+		 * Filters the Email field character limits (RFC 5321).
+		 *
+		 * @param array $limits {
+		 *     Character limits for the email value, split on the last @.
+		 *
+		 *     @type int $local  Max characters before the @. 0 disables the check. Default 64.
+		 *     @type int $domain Max characters after the @.  0 disables the check. Default 255.
+		 * }
+		 * @since 2.12.1
+		 */
+		$email_limits = apply_filters(
+			'srfm_email_field_char_limits',
+			[
+				'local'  => 64,
+				'domain' => 255,
+			]
+		);
+
+		return [
+			'local'  => isset( $email_limits['local'] ) ? absint( $email_limits['local'] ) : 64,
+			'domain' => isset( $email_limits['domain'] ) ? absint( $email_limits['domain'] ) : 255,
+		];
 	}
 
 	/**
@@ -293,6 +378,22 @@ class Field_Validation {
 
 		// Extract payment type (single or subscription).
 		$payment_config['payment_type'] = isset( $attrs['paymentType'] ) && is_string( $attrs['paymentType'] ) ? sanitize_text_field( $attrs['paymentType'] ) : 'one-time';
+
+		// Persist subscription plan (interval + billing cycles) for any form that
+		// has a subscription path. The admin picks a single value for each in the
+		// editor; the server uses these stored values as the source of truth on
+		// submit so a tampered interval/cycles in form data cannot redirect Stripe
+		// to a different billing cadence.
+		if ( in_array( $payment_config['payment_type'], [ 'subscription', 'both' ], true ) && isset( $attrs['subscriptionPlan'] ) && is_array( $attrs['subscriptionPlan'] ) ) {
+			if ( isset( $attrs['subscriptionPlan']['interval'] ) && is_string( $attrs['subscriptionPlan']['interval'] ) ) {
+				$payment_config['subscription_interval'] = sanitize_text_field( $attrs['subscriptionPlan']['interval'] );
+			}
+			if ( isset( $attrs['subscriptionPlan']['billingCycles'] ) ) {
+				// billingCycles is either an integer count or the string 'ongoing'.
+				$cycles_raw                                    = $attrs['subscriptionPlan']['billingCycles'];
+				$payment_config['subscription_billing_cycles'] = is_numeric( $cycles_raw ) ? intval( $cycles_raw ) : sanitize_text_field( (string) $cycles_raw );
+			}
+		}
 
 		// Extract amount type (fixed or minimum).
 		$payment_config['amount_type'] = isset( $attrs['amountType'] ) && is_string( $attrs['amountType'] ) ? sanitize_text_field( $attrs['amountType'] ) : 'fixed';
@@ -312,6 +413,44 @@ class Field_Validation {
 					if ( isset( $block['attrs']['slug'] ) && $block['attrs']['slug'] === $variable_amount_slug ) {
 						$payment_config['variable_amount_field_block_name'] = $block['blockName'];
 						break;
+					}
+				}
+			}
+		}
+
+		// BOTH MODE: store per-type amount configs so server-side validation can
+		// use the correct config based on which flow the user actually chose.
+		if ( 'both' === $payment_config['payment_type'] ) {
+			$payment_config['one_time_amount_type']    = isset( $attrs['oneTimeAmountType'] ) && is_string( $attrs['oneTimeAmountType'] ) ? sanitize_text_field( $attrs['oneTimeAmountType'] ) : 'fixed';
+			$payment_config['one_time_fixed_amount']   = isset( $attrs['oneTimeFixedAmount'] ) ? floatval( $attrs['oneTimeFixedAmount'] ) : 10;
+			$payment_config['one_time_minimum_amount'] = isset( $attrs['oneTimeMinimumAmount'] ) ? floatval( $attrs['oneTimeMinimumAmount'] ) : 0;
+
+			if ( isset( $attrs['oneTimeVariableAmountField'] ) ) {
+				$ot_slug = sanitize_text_field( $attrs['oneTimeVariableAmountField'] );
+				$payment_config['one_time_variable_amount_field'] = $ot_slug;
+				if ( ! empty( $ot_slug ) && is_array( $blocks ) ) {
+					foreach ( $blocks as $block ) {
+						if ( isset( $block['attrs']['slug'] ) && $block['attrs']['slug'] === $ot_slug ) {
+							$payment_config['one_time_variable_amount_field_block_name'] = $block['blockName'];
+							break;
+						}
+					}
+				}
+			}
+
+			$payment_config['subscription_amount_type']    = isset( $attrs['subscriptionAmountType'] ) && is_string( $attrs['subscriptionAmountType'] ) ? sanitize_text_field( $attrs['subscriptionAmountType'] ) : 'fixed';
+			$payment_config['subscription_fixed_amount']   = isset( $attrs['subscriptionFixedAmount'] ) ? floatval( $attrs['subscriptionFixedAmount'] ) : 10;
+			$payment_config['subscription_minimum_amount'] = isset( $attrs['subscriptionMinimumAmount'] ) ? floatval( $attrs['subscriptionMinimumAmount'] ) : 0;
+
+			if ( isset( $attrs['subscriptionVariableAmountField'] ) ) {
+				$sub_slug = sanitize_text_field( $attrs['subscriptionVariableAmountField'] );
+				$payment_config['subscription_variable_amount_field'] = $sub_slug;
+				if ( ! empty( $sub_slug ) && is_array( $blocks ) ) {
+					foreach ( $blocks as $block ) {
+						if ( isset( $block['attrs']['slug'] ) && $block['attrs']['slug'] === $sub_slug ) {
+							$payment_config['subscription_variable_amount_field_block_name'] = $block['blockName'];
+							break;
+						}
 					}
 				}
 			}
@@ -421,6 +560,33 @@ class Field_Validation {
 	}
 
 	/**
+	 * Process textarea block configuration.
+	 *
+	 * @param array<mixed> $attrs Block attributes.
+	 * @return array Processed textarea configuration.
+	 * @since 2.8.2
+	 */
+	private static function process_textarea_block( $attrs ) {
+		// Always emit a min_length key so a cleared/invalid value overwrites any
+		// previously stored config on save instead of falling back to stale data.
+		// Rich-text editors submit HTML markup which would skew mb_strlen counts,
+		// so they're treated as "no min-length validation".
+		if ( ! empty( $attrs['isRichText'] ) ) {
+			return [ 'min_length' => 0 ];
+		}
+
+		$min_length = isset( $attrs['minLength'] ) && is_numeric( $attrs['minLength'] ) ? absint( $attrs['minLength'] ) : 0;
+		$max_length = isset( $attrs['maxLength'] ) && is_numeric( $attrs['maxLength'] ) ? absint( $attrs['maxLength'] ) : 0;
+
+		// Misconfiguration guard — drop min when it exceeds max so the form stays submittable.
+		if ( $max_length > 0 && $min_length > $max_length ) {
+			$min_length = 0;
+		}
+
+		return [ 'min_length' => $min_length ];
+	}
+
+	/**
 	 * Process number block configuration.
 	 *
 	 * @param array<mixed> $attrs Block attributes.
@@ -446,6 +612,16 @@ class Field_Validation {
 		// Extract max value.
 		if ( isset( $attrs['max'] ) ) {
 			$number_config['max'] = floatval( $attrs['max'] );
+		}
+
+		// Capture calculation config (Pro feature) so a calculation-driven number field used as a
+		// payment amount source can be re-derived server-side instead of trusting the submitted
+		// value. Harmless when the calculation feature is not in use.
+		if ( ! empty( $attrs['enableCalculation'] ) ) {
+			$number_config['enableCalculation']  = true;
+			$number_config['calculationFormula'] = isset( $attrs['calculationFormula'] ) && is_string( $attrs['calculationFormula'] ) ? $attrs['calculationFormula'] : '';
+			// Stored as null when unset so the validator rounds only when a precision is configured.
+			$number_config['calculationRound'] = isset( $attrs['calculationRound'] ) && is_numeric( $attrs['calculationRound'] ) ? absint( $attrs['calculationRound'] ) : null;
 		}
 
 		return $number_config;

@@ -27,6 +27,13 @@ class Rest_Api {
 	use Get_Instance;
 
 	/**
+	 * Onboarding user details option key.
+	 *
+	 * @var string
+	 */
+	private $onboarding_user_details_key = 'onboarding_user_details';
+
+	/**
 	 * Dropdown counter for field name generation.
 	 *
 	 * @var int
@@ -75,6 +82,32 @@ class Rest_Api {
 	 */
 	public function sanitize_boolean_field( $value ) {
 		return filter_var( $value, FILTER_VALIDATE_BOOLEAN );
+	}
+
+	/**
+	 * Return the visitor's detected country code.
+	 *
+	 * Public, read-only — resolves the country for the *current* request's IP via
+	 * Helper::get_geo_country(), so the phone field can fetch it per-visitor and
+	 * work on full-page-cached sites. Outbound geolocation calls are bounded by
+	 * the hourly cap inside Helper::get_geo_country().
+	 *
+	 * @since 2.11.1
+	 * @return \WP_REST_Response
+	 */
+	public function get_geo_country() {
+		// Pass an empty fallback so '' unambiguously means "not confidently
+		// detected" (no CDN header and no successful IP lookup). The frontend then
+		// falls back to a privacy-safe, network-free Intl guess in the browser.
+		$country = Helper::get_geo_country( '' );
+
+		return new \WP_REST_Response(
+			[
+				'country'  => $country,
+				'detected' => '' !== $country,
+			],
+			200
+		);
 	}
 
 	/**
@@ -353,6 +386,111 @@ class Rest_Api {
 		$status = Onboarding::get_instance()->get_onboarding_status();
 
 		return new \WP_REST_Response( [ 'completed' => $status ] );
+	}
+
+	/**
+	 * Save onboarding user details and send lead data to metrics server.
+	 *
+	 * @since 2.5.3
+	 * @param \WP_REST_Request $request Full details about the request.
+	 * @return \WP_REST_Response
+	 */
+	public function save_onboarding_user_details( $request ) {
+		$nonce = Helper::get_string_value( $request->get_header( 'X-WP-Nonce' ) );
+
+		if ( ! wp_verify_nonce( sanitize_text_field( $nonce ), 'wp_rest' ) ) {
+			return new \WP_REST_Response(
+				[ 'error' => __( 'Security verification failed. Please refresh the page and try again.', 'sureforms' ) ],
+				403
+			);
+		}
+
+		$first_name = sanitize_text_field( Helper::get_string_value( $request->get_param( 'first_name' ) ) );
+		$last_name  = sanitize_text_field( Helper::get_string_value( $request->get_param( 'last_name' ) ) );
+		$email      = sanitize_email( Helper::get_string_value( $request->get_param( 'email' ) ) );
+
+		if ( empty( $first_name ) || empty( $email ) || ! is_email( $email ) ) {
+			return new \WP_REST_Response(
+				[ 'error' => __( 'Invalid onboarding user details.', 'sureforms' ) ],
+				400
+			);
+		}
+
+		$stored_details = $this->get_onboarding_user_details();
+		if ( ! empty( $stored_details['lead'] ) ) {
+			return new \WP_REST_Response(
+				[
+					'success' => true,
+					'lead'    => true,
+				]
+			);
+		}
+
+		$this->set_onboarding_user_details(
+			[
+				'first_name' => $first_name,
+				'last_name'  => $last_name,
+				'email'      => $email,
+			]
+		);
+
+		$domain = wp_parse_url( home_url(), PHP_URL_HOST );
+		if ( ! is_string( $domain ) ) {
+			$domain = '';
+		}
+
+		$body = wp_json_encode(
+			[
+				// Lowercase keys satisfy current BSF Metrics REST arg validation.
+				'email'      => $email,
+				'first_name' => $first_name,
+				'last_name'  => $last_name,
+				'domain'     => $domain,
+				'source'     => 'sureforms',
+				// Keep legacy uppercase keys for backward compatibility.
+				'EMAIL'      => $email,
+				'FIRSTNAME'  => $first_name,
+				'LASTNAME'   => $last_name,
+				'DOMAIN'     => $domain,
+			]
+		);
+
+		$lead_captured = false;
+		if ( false !== $body ) {
+			$response = wp_remote_post(
+				'https://metrics.brainstormforce.com/wp-json/bsf-metrics-server/v1/subscribe',
+				[
+					'headers' => [
+						'Content-Type' => 'application/json',
+					],
+					'body'    => $body,
+					'timeout' => 15,
+				]
+			);
+
+			$response_code = wp_remote_retrieve_response_code( $response );
+			if ( ! is_wp_error( $response ) && in_array( $response_code, [ 200, 201, 204 ], true ) ) {
+				$lead_captured = true;
+			}
+		}
+
+		if ( $lead_captured ) {
+			$this->set_onboarding_user_details(
+				[
+					'first_name' => $first_name,
+					'last_name'  => $last_name,
+					'email'      => $email,
+					'lead'       => true,
+				]
+			);
+		}
+
+		return new \WP_REST_Response(
+			[
+				'success' => true,
+				'lead'    => $lead_captured,
+			]
+		);
 	}
 
 	/**
@@ -657,8 +795,9 @@ class Rest_Api {
 			);
 		}
 
-		// Get adjacent entry IDs for navigation (all entries in chronological order).
-		$adjacent_entries = Entries_Class::get_adjacent_entry_ids( $entry_id );
+		// Get adjacent entry IDs for navigation scoped to the same form.
+		$form_id_raw      = $entry['form_id'] ?? 0;
+		$adjacent_entries = Entries_Class::get_adjacent_entry_ids( $entry_id, [ 'form_id' => is_scalar( $form_id_raw ) ? absint( $form_id_raw ) : 0 ] );
 
 		// Process form data.
 		$form_data       = [];
@@ -738,9 +877,12 @@ class Rest_Api {
 			'form_data'       => $form_data,
 			'form_content'    => $form_fields,
 			'submission_info' => [
-				'user_ip'      => $entry['submission_info']['user_ip'] ?? '',
-				'browser_name' => $entry['submission_info']['browser_name'] ?? '',
-				'device_name'  => $entry['submission_info']['device_name'] ?? '',
+				'user_ip'        => $entry['submission_info']['user_ip'] ?? '',
+				'browser_name'   => $entry['submission_info']['browser_name'] ?? '',
+				'device_name'    => $entry['submission_info']['device_name'] ?? '',
+				// Re-sanitize at the exposure boundary in case the stored value
+				// was written by a future code path that bypasses form-submit.php.
+				'submission_url' => esc_url_raw( $entry['submission_info']['submission_url'] ?? '', [ 'http', 'https' ] ),
 			],
 			'user'            => $user_info ? [
 				'id'           => $user_id,
@@ -811,12 +953,24 @@ class Rest_Api {
 			if ( ! is_array( $log ) ) {
 				continue;
 			}
-			$formatted_logs[] = [
+			$formatted_log = [
 				'id'        => $offset + $index, // Use offset-based ID for consistent deletion.
 				'title'     => $log['title'] ?? '',
 				'timestamp' => $log['timestamp'] ?? time(),
 				'messages'  => $log['messages'] ?? [],
 			];
+
+			// Pass through (sanitized) retry metadata so an integration/webhook log row can
+			// offer a "Retry" action for that specific failed trigger. Set by the Pro
+			// webhook / native-integration dispatchers as [ 'type' => webhook|native, 'id' => <trigger id> ].
+			if ( isset( $log['retry'] ) && is_array( $log['retry'] ) && ! empty( $log['retry']['type'] ) && isset( $log['retry']['id'] ) ) {
+				$formatted_log['retry'] = [
+					'type' => sanitize_text_field( Helper::get_string_value( $log['retry']['type'] ) ),
+					'id'   => sanitize_text_field( Helper::get_string_value( $log['retry']['id'] ) ),
+				];
+			}
+
+			$formatted_logs[] = $formatted_log;
 		}
 
 		$response_data = [
@@ -966,6 +1120,27 @@ class Rest_Api {
 					$result = wp_delete_post( $form_id, true );
 					break;
 
+				case 'draft':
+					if ( 'trash' === $post->post_status ) {
+						$errors[] = [
+							'form_id' => $form_id,
+							'error'   => __( 'Use the restore action to recover a trashed form before switching it to draft.', 'sureforms' ),
+						];
+					} elseif ( 'draft' === $post->post_status ) {
+						$errors[] = [
+							'form_id' => $form_id,
+							'error'   => __( 'This form is already a draft.', 'sureforms' ),
+						];
+					} else {
+						$result = wp_update_post(
+							[
+								'ID'          => $form_id,
+								'post_status' => 'draft',
+							]
+						);
+					}
+					break;
+
 				default:
 					$errors[] = [
 						'form_id' => $form_id,
@@ -1054,9 +1229,12 @@ class Rest_Api {
 					}
 
 					// Generate field name.
-					$label           = is_string( $merged_attributes['label'] ?? '' ) ? $merged_attributes['label'] : '';
-					$slug            = is_string( $merged_attributes['slug'] ?? '' ) ? $merged_attributes['slug'] : '';
-					$block_id        = is_string( $merged_attributes['block_id'] ?? '' ) ? $merged_attributes['block_id'] : '';
+					$label           = $merged_attributes['label'] ?? '';
+					$label           = is_string( $label ) ? $label : '';
+					$slug            = $merged_attributes['slug'] ?? '';
+					$slug            = is_string( $slug ) ? $slug : '';
+					$block_id        = $merged_attributes['block_id'] ?? '';
+					$block_id        = is_string( $block_id ) ? $block_id : '';
 					$field_name      = '';
 					$base_field_name = '';
 
@@ -1120,6 +1298,49 @@ class Rest_Api {
 	 */
 	public function get_dropdown_counter() {
 		return self::$dropdown_counter;
+	}
+
+	/**
+	 * Get onboarding user details.
+	 *
+	 * @since 2.5.3
+	 * @return array<string, mixed>
+	 */
+	private function get_onboarding_user_details() {
+		$defaults = [
+			'first_name' => '',
+			'last_name'  => '',
+			'email'      => '',
+			'lead'       => false,
+		];
+
+		$user_details = Helper::get_srfm_option( $this->onboarding_user_details_key, $defaults );
+		if ( ! is_array( $user_details ) ) {
+			return $defaults;
+		}
+
+		return wp_parse_args( $user_details, $defaults );
+	}
+
+	/**
+	 * Set onboarding user details.
+	 *
+	 * @since 2.5.3
+	 * @param array<string, mixed> $user_details User details to store.
+	 * @return void
+	 */
+	private function set_onboarding_user_details( $user_details ) {
+		$details = wp_parse_args(
+			$user_details,
+			[
+				'first_name' => '',
+				'last_name'  => '',
+				'email'      => '',
+				'lead'       => false,
+			]
+		);
+
+		Helper::update_srfm_option( $this->onboarding_user_details_key, $details );
 	}
 
 	/**
@@ -1202,6 +1423,14 @@ class Rest_Api {
 					'callback'            => [ AI_Auth::get_instance(), 'handle_access_key' ],
 					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
 				],
+				// Public route: returns the visitor's detected country code. Called
+				// per-visitor from the phone field so auto-country detection works
+				// on full-page-cached sites (the value isn't baked into cached HTML).
+				'geo-country'               => [
+					'methods'             => 'GET',
+					'callback'            => [ $this, 'get_geo_country' ],
+					'permission_callback' => '__return_true',
+				],
 				// This route is to get the form submissions for the last 30 days.
 				'entries-chart-data'        => [
 					'methods'             => 'GET',
@@ -1277,6 +1506,31 @@ class Rest_Api {
 					'callback'            => [ $this, 'get_onboarding_status' ],
 					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
 				],
+				'onboarding/user-details'   => [
+					'methods'             => 'POST',
+					'callback'            => [ $this, 'save_onboarding_user_details' ],
+					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
+					'args'                => [
+						'first_name' => [
+							'required'          => true,
+							'sanitize_callback' => 'sanitize_text_field',
+							'validate_callback' => static function( $value ) {
+								return is_string( $value ) && '' !== trim( $value );
+							},
+						],
+						'last_name'  => [
+							'required'          => false,
+							'sanitize_callback' => 'sanitize_text_field',
+						],
+						'email'      => [
+							'required'          => true,
+							'sanitize_callback' => 'sanitize_email',
+							'validate_callback' => static function( $value ) {
+								return is_string( $value ) && is_email( $value );
+							},
+						],
+					],
+				],
 				// Plugin status endpoint.
 				'plugin-status'             => [
 					'methods'             => 'GET',
@@ -1316,12 +1570,16 @@ class Rest_Api {
 							'default'           => '',
 						],
 						'orderby'   => [
+							'type'              => 'string',
 							'sanitize_callback' => 'sanitize_text_field',
 							'default'           => 'created_at',
+							'enum'              => [ 'ID', 'id', 'form_id', 'user_id', 'status', 'type', 'created_at', 'updated_at' ],
 						],
 						'order'     => [
+							'type'              => 'string',
 							'sanitize_callback' => 'sanitize_text_field',
 							'default'           => 'DESC',
+							'enum'              => [ 'ASC', 'DESC' ],
 						],
 						'per_page'  => [
 							'sanitize_callback' => 'absint',
@@ -1543,7 +1801,7 @@ class Rest_Api {
 						],
 					],
 				],
-				// Form lifecycle management endpoint (trash/restore/delete).
+				// Form lifecycle management endpoint (trash/restore/delete/draft).
 				'forms/manage'              => [
 					'methods'             => 'POST',
 					'callback'            => [ $this, 'manage_form_lifecycle' ],
@@ -1568,7 +1826,7 @@ class Rest_Api {
 						'action'   => [
 							'required'          => true,
 							'type'              => 'string',
-							'enum'              => [ 'trash', 'restore', 'delete' ],
+							'enum'              => [ 'trash', 'restore', 'delete', 'draft' ],
 							'sanitize_callback' => 'sanitize_text_field',
 						],
 					],

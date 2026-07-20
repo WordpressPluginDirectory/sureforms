@@ -41,9 +41,11 @@ class List_Forms extends Abstract_Ability {
 	 */
 	public function get_annotations() {
 		return [
-			'readonly'    => true,
-			'destructive' => false,
-			'idempotent'  => true,
+			'readonly'      => true,
+			'destructive'   => false,
+			'idempotent'    => true,
+			'priority'      => 1.0,
+			'openWorldHint' => false,
 		];
 	}
 
@@ -52,8 +54,9 @@ class List_Forms extends Abstract_Ability {
 	 */
 	public function get_input_schema() {
 		return [
-			'type'       => 'object',
-			'properties' => [
+			'type'                 => 'object',
+			'additionalProperties' => false,
+			'properties'           => [
 				'status'   => [
 					'type'        => 'string',
 					'description' => __( 'Filter by form status. Defaults to "publish".', 'sureforms' ),
@@ -180,7 +183,7 @@ class List_Forms extends Abstract_Ability {
 		$table_name   = $wpdb->prefix . 'srfm_entries';
 		$placeholders = implode( ',', array_fill( 0, count( $form_ids ), '%d' ) );
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Batch query to avoid N+1; results are not cached as they reflect real-time entry counts.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Batch query to avoid N+1; table name from $wpdb->prefix and placeholders from array_fill() (not user input); results not cached as they reflect real-time entry counts.
 		$results = $wpdb->get_results(
 			$wpdb->prepare(
 				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Table name and placeholders are constructed from $wpdb->prefix and array_fill(), not user input.

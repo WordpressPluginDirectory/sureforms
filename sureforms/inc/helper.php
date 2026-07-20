@@ -8,6 +8,7 @@
 
 namespace SRFM\Inc;
 
+use SRFM\Inc\Compatibility\Multilingual\String_Translator;
 use SRFM\Inc\Database\Tables\Entries;
 use SRFM\Inc\Traits\Get_Instance;
 use WP_Error;
@@ -66,9 +67,10 @@ class Helper {
 	 * @return array<string>
 	 */
 	public static function get_common_err_msg() {
+		$translator = String_Translator::get_instance();
 		return [
-			'required' => __( 'This field is required.', 'sureforms' ),
-			'unique'   => __( 'Value needs to be unique.', 'sureforms' ),
+			'required' => $translator->translate_validation_message( 'srfm_required_field', __( 'This field is required.', 'sureforms' ) ),
+			'unique'   => $translator->translate_validation_message( 'srfm_unique_field', __( 'Value needs to be unique.', 'sureforms' ) ),
 		];
 	}
 
@@ -127,6 +129,18 @@ class Helper {
 			return intval( $trimmed_value, $base );
 		}
 			return 0;
+	}
+
+	/**
+	 * Validate a date string in Y-m-d format.
+	 *
+	 * @param string $date The date string to validate.
+	 * @since 2.6.0
+	 * @return bool
+	 */
+	public static function validate_date( string $date ): bool {
+		$d = \DateTime::createFromFormat( 'Y-m-d', $date );
+		return $d && $d->format( 'Y-m-d' ) === $date;
 	}
 
 	/**
@@ -261,6 +275,25 @@ class Helper {
 	}
 
 	/**
+	 * Sanitize a CSS value to prevent injection.
+	 *
+	 * Strips characters that can break out of a CSS property value context
+	 * and removes dangerous CSS functions while preserving safe ones
+	 * (rgb, hsl, linear-gradient, etc.).
+	 *
+	 * @param mixed $value Raw CSS value.
+	 * @return string Sanitized CSS value.
+	 * @since 2.7.0
+	 */
+	public static function sanitize_css_value( $value ) {
+		$value = self::get_string_value( $value );
+		// Strip characters that can break out of a CSS property value context.
+		$value = preg_replace( '/[{}<>;\\\\"\'`]/', '', $value ) ?? '';
+		// Remove dangerous CSS functions (url, expression, import, etc.) while preserving safe ones (rgb, hsl, linear-gradient, etc.).
+		return preg_replace( '/\b(url|expression|import|javascript)\s*\(/i', '(', $value ) ?? '';
+	}
+
+	/**
 	 * This function sanitizes the submitted form data according to the field type.
 	 *
 	 * @param array<mixed> $form_data $form_data User submitted form data.
@@ -283,6 +316,43 @@ class Helper {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Sanitize a value based on its PHP type.
+	 *
+	 * Recursively sanitizes arrays while preserving native PHP types (bool, int, float).
+	 * Use this for complex object metas with many properties where per-field callbacks are impractical.
+	 *
+	 * @param mixed $value The value to sanitize.
+	 * @param int   $depth Current recursion depth. Values nested beyond 10 levels are discarded.
+	 * @since 2.8.0
+	 * @return mixed The sanitized value.
+	 */
+	public static function sanitize_by_type( $value, int $depth = 0 ) {
+		if ( $depth > 10 ) {
+			return '';
+		}
+		if ( is_array( $value ) ) {
+			$sanitized = [];
+			foreach ( $value as $key => $val ) {
+				$sanitized[ sanitize_text_field( (string) $key ) ] = self::sanitize_by_type( $val, $depth + 1 );
+			}
+			return $sanitized;
+		}
+		if ( is_bool( $value ) ) {
+			return $value;
+		}
+		if ( is_int( $value ) ) {
+			return intval( $value );
+		}
+		if ( is_float( $value ) ) {
+			return floatval( $value );
+		}
+		if ( is_string( $value ) ) {
+			return sanitize_text_field( $value );
+		}
+		return '';
 	}
 
 	/**
@@ -344,7 +414,7 @@ class Helper {
 					ob_start();
 					?>
 					<label id="srfm-label-<?php echo esc_attr( $block_id ); ?>" for="srfm-<?php echo esc_attr( $slug ); ?>-<?php echo esc_attr( $block_id ); ?>" class="srfm-block-label">
-						<?php echo wp_kses_post( $label ); ?>
+						<?php echo esc_html( $label ); ?>
 						<?php if ( $required ) { ?>
 							<span class="srfm-required" aria-hidden="true"> *</span>
 						<?php } ?>
@@ -358,7 +428,7 @@ class Helper {
 					ob_start();
 					?>
 					<div class="srfm-description" id="srfm-description-<?php echo esc_attr( $block_id ); ?>">
-						<?php echo wp_kses_post( $help ); ?>
+						<?php echo esc_html( $help ); ?>
 					</div>
 					<?php
 					$markup = ob_get_clean();
@@ -387,14 +457,14 @@ class Helper {
 				}
 				break;
 			case 'placeholder':
-				$markup = $label && '1' === $show_labels_as_placeholder ? wp_kses_post( $label ) . ( $required ? esc_attr( $required_sign ) : '' ) : '';
+				$markup = $label && '1' === $show_labels_as_placeholder ? esc_html( $label ) . ( $required ? esc_attr( $required_sign ) : '' ) : '';
 				break;
 			case 'label_text':
 				// This has been added for generating label text for the form markup instead of adding it in the label tag.
 				if ( $label ) {
 					ob_start();
 					?>
-					<?php echo wp_kses_post( $label ); ?>
+					<?php echo esc_html( $label ); ?>
 					<?php if ( $required ) { ?>
 						<span class="srfm-required" aria-hidden="true"> *</span>
 					<?php } ?>
@@ -709,6 +779,7 @@ class Helper {
 			}
 			$label = explode( '-lbl-', $key )[1];
 			$slug  = implode( '-', array_slice( explode( '-', $label ), 1 ) );
+			$slug  = str_replace( ' ', '_', $slug );
 
 			/**
 			 * Filters whether a field should be skipped when mapping slugs to submission data.
@@ -1201,6 +1272,17 @@ class Helper {
 
 		if ( ! empty( $block['attrs']['label'] ) && is_string( $block['attrs']['label'] ) ) {
 			$slug = sanitize_title( $block['attrs']['label'] );
+
+			// If the label contains non-Latin characters (e.g. Japanese, Chinese),
+			// sanitize_title() produces a percent-encoded slug like "%e3%83%95%e3%83%aa".
+			// These are unstable and break conditional logic field matching.
+			// Fall back to the block name to ensure a stable ASCII slug.
+			if ( false !== strpos( $slug, '%' ) ) {
+				$block_name = is_string( $block['blockName'] ) ? $block['blockName'] : '';
+				// Strip the 'srfm/' namespace to match JS-side cleanForSlug() output.
+				$block_name = (string) preg_replace( '/^srfm\//', '', $block_name );
+				$slug       = sanitize_title( $block_name );
+			}
 		}
 
 		if ( ! empty( $prefix ) ) {
@@ -1388,9 +1470,40 @@ class Helper {
 			$utm_args = [];
 		}
 
+		// SRFM-2709: deterministic UTM attribution — start.
+		// When the caller opts into UTM tracking by passing any utm_args, fill in
+		// SureForms' deterministic source/campaign defaults. Caller-provided keys
+		// (including the placement passed via utm_medium) always win.
+		if ( ! empty( $utm_args ) ) {
+			$utm_args = array_merge(
+				[
+					'utm_source'   => 'sureforms_plugin',
+					'utm_campaign' => 'core_plugin',
+				],
+				$utm_args
+			);
+		}
+		// SRFM-2709: deterministic UTM attribution — end.
+
 		if ( class_exists( 'BSF_UTM_Analytics' ) ) {
 			$url = \BSF_UTM_Analytics::get_utm_ready_link( $url, 'sureforms', $utm_args );
 		}
+
+		// SRFM-2709: post-BSF_UTM_Analytics fallback — start.
+		// BSF_UTM_Analytics returns the URL unchanged when no install referer is
+		// recorded. Merge any caller UTM keys still missing from the final URL.
+		if ( ! empty( $utm_args ) ) {
+			$existing = [];
+			$query    = wp_parse_url( $url, PHP_URL_QUERY );
+			if ( is_string( $query ) && '' !== $query ) {
+				parse_str( $query, $existing );
+			}
+			$missing = array_diff_key( $utm_args, $existing );
+			if ( ! empty( $missing ) ) {
+				$url = add_query_arg( $missing, $url );
+			}
+		}
+		// SRFM-2709: post-BSF_UTM_Analytics fallback — end.
 
 		return esc_url( $url );
 	}
@@ -1685,7 +1798,7 @@ class Helper {
 	 * @return array<mixed>
 	 */
 	public static function sureforms_get_integration() {
-		$suretrigger_connected  = apply_filters( 'suretriggers_is_user_connected', '' );
+		$suretrigger_connected  = apply_filters( 'suretriggers_is_user_connected', '' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- SureTriggers' own filter; the name must match SureTriggers exactly to integrate.
 		$logo_sure_triggers     = file_get_contents( plugin_dir_path( SRFM_FILE ) . 'images/suretriggers.svg' );
 		$logo_full              = file_get_contents( plugin_dir_path( SRFM_FILE ) . 'images/suretriggers_full.svg' );
 		$logo_sure_mails        = file_get_contents( plugin_dir_path( SRFM_FILE ) . 'images/suremails.svg' );
@@ -1693,8 +1806,18 @@ class Helper {
 		$logo_starter_templates = file_get_contents( plugin_dir_path( SRFM_FILE ) . 'images/starterTemplates.svg' );
 		$logo_sure_rank         = file_get_contents( plugin_dir_path( SRFM_FILE ) . 'images/surerank.svg' );
 		$logo_sure_contact      = file_get_contents( plugin_dir_path( SRFM_FILE ) . 'images/surecontact.svg' );
+		$logo_sure_donation     = file_get_contents( plugin_dir_path( SRFM_FILE ) . 'images/suredonation.svg' );
 
 		$integrations = [
+			'sure_donation'     => [
+				'title'                 => __( 'SureDonation', 'sureforms' ),
+				'singleLineDescription' => __( 'Start Collecting Donations Today', 'sureforms' ),
+				'subtitle'              => __( 'Want to accept donations too? SureDonation makes it easy to collect contributions right on your WordPress site.', 'sureforms' ),
+				'status'                => self::get_plugin_status( 'suredonation/suredonation.php' ),
+				'slug'                  => 'suredonation',
+				'path'                  => 'suredonation/suredonation.php',
+				'logo'                  => self::encode_svg( is_string( $logo_sure_donation ) ? $logo_sure_donation : '' ),
+			],
 			'sure_contact'      => [
 				'title'                 => __( 'SureContact', 'sureforms' ),
 				'singleLineDescription' => __( 'Turn Emails Into Revenue with a CRM Built for Your Website!', 'sureforms' ),
@@ -2040,7 +2163,7 @@ class Helper {
 		}
 
 		// Apply the filter with additional arguments.
-		$filtered = apply_filters( $filter_name, $default, ...$args );
+		$filtered = apply_filters( $filter_name, $default, ...$args ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- Generic dynamic-filter dispatcher; the caller supplies the (already prefixed) hook name.
 
 		// Return filtered result if it's a non-empty array.
 		return is_array( $filtered ) && ! empty( $filtered ) ? $filtered : $default;
@@ -2270,34 +2393,252 @@ class Helper {
 	}
 
 	/**
-	 * Get the nonces for the form submission.
+	 * Get the visitor's IP address.
 	 *
-	 * @since 2.5.1
-	 * @return array<string> The nonces for the form submission.
+	 * Centralised IP detection that checks common proxy headers before
+	 * falling back to REMOTE_ADDR. Handles comma-separated IPs that
+	 * load-balancers / CDNs may append (takes the first, i.e. client IP).
+	 *
+	 * NOTE: Existing callers (Smart_Tags::get_the_user_ip, Front_End::get_user_ip,
+	 * inline reads in Form_Submit) can be migrated to this method in the future
+	 * to avoid duplicating the same header-chain logic.
+	 *
+	 * @since 2.8.0
+	 * @return string Validated IP address, or empty string if unavailable.
 	 */
-	public static function get_frontend_nonces() {
-		$nonces = [
-			'unique_validation' => wp_create_nonce( 'unique_validation_nonce' ),
-			'form_submit'       => wp_create_nonce( 'srfm_form_submit' ),
-			'payment_nonce'     => wp_create_nonce( 'srfm_payment_nonce' ),
+	public static function get_visitor_ip() {
+		$headers = [
+			'HTTP_CLIENT_IP',
+			'HTTP_X_FORWARDED_FOR',
+			'HTTP_X_REAL_IP',
+			'HTTP_X_FORWARDED',
+			'HTTP_FORWARDED_FOR',
+			'HTTP_FORWARDED',
+			'REMOTE_ADDR',
 		];
 
-		/**
-		 * Filter to allow Pro and third-party plugins to add additional nonces.
-		 *
-		 * @since 2.5.1
-		 * @param array<string> $nonces The nonces for the form submission.
-		 */
-		return apply_filters( 'srfm_frontend_nonces', $nonces );
+		foreach ( $headers as $header ) {
+			if ( empty( $_SERVER[ $header ] ) ) {
+				continue;
+			}
+
+			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Validated by FILTER_VALIDATE_IP below.
+			$raw = wp_unslash( $_SERVER[ $header ] );
+
+			// Proxies may send comma-separated IPs; the first is the original client.
+			if ( false !== strpos( $raw, ',' ) ) {
+				$raw = trim( explode( ',', $raw )[0] );
+			}
+
+			$ip = filter_var( $raw, FILTER_VALIDATE_IP );
+			if ( false !== $ip ) {
+				/**
+				 * Filters the detected visitor IP address.
+				 *
+				 * @since 2.8.0
+				 *
+				 * @param string $ip Validated IP address.
+				 */
+				return apply_filters( 'srfm_visitor_ip', $ip );
+			}
+		}
+
+		return '';
 	}
 
 	/**
-	 * Check if the form markup nonce should be updated.
+	 * Detect the visitor's 2-letter country code via server-side IP geolocation.
 	 *
-	 * @since 2.5.1
-	 * @return bool True if the form markup nonce should be updated, false otherwise.
+	 * Prefers a CDN/server-provided country header (Cloudflare, CloudFront, mod_geoip)
+	 * when present — free, instant and cache-safe. Otherwise calls ipapi.co once per
+	 * visitor IP and caches the result in a transient for 24 hours so subsequent
+	 * lookups for the same IP resolve instantly. Failures are cached for a short TTL
+	 * (see get_geo_failure_ttl()) to avoid retry storms while still self-healing, and
+	 * a site-wide hourly cap (filterable via `srfm_geo_api_hourly_cap`, default 40)
+	 * bounds outbound calls. Private/reserved IPs are rejected up front.
+	 *
+	 * Intended to be called per-visitor (e.g. via the geo-country REST route) so
+	 * the result is correct on full-page-cached sites instead of being baked into
+	 * the cached HTML.
+	 *
+	 * Local testing: private/loopback IPs (e.g. 127.0.0.1) cannot be geolocated, so
+	 * inject a public IP via the `srfm_visitor_ip` filter to exercise detection:
+	 *
+	 *     add_filter( 'srfm_visitor_ip', static fn() => '8.8.8.8' ); // US; try 1.1.1.1 etc.
+	 *
+	 * @param string $fallback Country code returned when detection is unavailable.
+	 * @since 2.11.1
+	 * @return string Lowercase 2-letter country code.
 	 */
-	public static function should_update_form_markup_nonce() {
-		return apply_filters( 'srfm_should_update_form_markup_nonce', true );
+	public static function get_geo_country( $fallback = 'us' ) {
+		// Prefer a CDN/server-provided country header — free, instant, per-visitor
+		// and cache-safe. It is independent of the connecting IP (it still resolves
+		// when the visitor IP is private/loopback, e.g. local dev or behind a
+		// proxy), so it must be checked before the IP-based path below.
+		$cdn_country = self::get_cdn_country();
+		if ( '' !== $cdn_country ) {
+			return $cdn_country;
+		}
+
+		$ip = self::get_visitor_ip();
+		if ( empty( $ip ) ) {
+			return $fallback;
+		}
+
+		// Reject private/reserved IPs: ipapi.co cannot geolocate them, and accepting
+		// them would let spoofed X-Forwarded-For headers flood the transient cache.
+		if ( ! filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) ) {
+			return $fallback;
+		}
+
+		// Versioned key (v2) so stale failure transients written by older code
+		// (which used the byte-identical 'srfm_geo_' key and a 1h TTL) don't shadow
+		// the current CDN/fallback logic for the failure-TTL window after an upgrade.
+		$cache_key = 'srfm_geo_v2_' . md5( $ip );
+		$cached    = get_transient( $cache_key );
+		if ( is_string( $cached ) && '' !== $cached ) {
+			return $cached;
+		}
+
+		// Site-wide hourly cap on outbound ipapi calls; the counter rolls over
+		// every hour (key includes YmdH) so it never needs an explicit reset.
+		$quota_key = 'srfm_geo_quota_' . gmdate( 'YmdH' );
+		$quota_cap = self::get_integer_value( apply_filters( 'srfm_geo_api_hourly_cap', 40 ) );
+		$count     = self::get_integer_value( get_transient( $quota_key ) );
+		if ( $count >= $quota_cap ) {
+			self::srfm_log( $quota_cap, 'SRFM geo lookup skipped (hourly cap reached):' );
+			// Do NOT cache a per-IP transient here: the hourly counter already
+			// blocks outbound calls, and writing per IP is the one path not bounded
+			// by the cap — it would let spoofed X-Forwarded-For headers churn
+			// wp_options / the object cache under sustained traffic.
+			return $fallback;
+		}
+		set_transient( $quota_key, $count + 1, HOUR_IN_SECONDS );
+
+		// Pass the visitor's IP explicitly via /{ip}/json/ — the request originates
+		// from the server, so the bare /json/ endpoint would return the host's country.
+		$url = 'https://ipapi.co/' . rawurlencode( $ip ) . '/json/';
+
+		// ipapi.co's free (keyless) tier is heavily rate-limited, so unauthenticated
+		// lookups are best-effort and often fail to the configured fallback. Sites
+		// that need reliable IP-based detection can supply a paid ipapi.co key via
+		// this filter; CDN-fronted sites resolve earlier via get_cdn_country() and
+		// never reach this call.
+		$api_key = self::get_string_value( apply_filters( 'srfm_ipapi_api_key', '' ) );
+		if ( '' !== $api_key ) {
+			$url = add_query_arg( 'key', rawurlencode( $api_key ), $url );
+		}
+
+		$response = wp_remote_get(
+			$url,
+			[
+				'timeout'    => 3,
+				'user-agent' => 'SureForms/' . SRFM_VER . ' (+https://sureforms.com)',
+			]
+		);
+
+		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
+			$detail = is_wp_error( $response ) ? $response->get_error_message() : wp_remote_retrieve_response_code( $response );
+			self::srfm_log( $detail, 'SRFM geo lookup failed (transport):' );
+			set_transient( $cache_key, $fallback, self::get_geo_failure_ttl() );
+			return $fallback;
+		}
+
+		$body = json_decode( wp_remote_retrieve_body( $response ), true );
+
+		// ipapi.co's free tier returns HTTP 200 with a JSON error body
+		// (e.g. {"error":true,"reason":"RateLimited"}) when throttled — treat as a failure.
+		if ( is_array( $body ) && ! empty( $body['error'] ) ) {
+			$reason = ! empty( $body['reason'] ) && is_string( $body['reason'] ) ? $body['reason'] : 'unknown';
+			self::srfm_log( $reason, 'SRFM geo lookup failed (ipapi error):' );
+			set_transient( $cache_key, $fallback, self::get_geo_failure_ttl() );
+			return $fallback;
+		}
+
+		if ( ! is_array( $body ) || empty( $body['country_code'] ) || ! is_string( $body['country_code'] ) ) {
+			self::srfm_log( wp_remote_retrieve_response_code( $response ), 'SRFM geo lookup failed (no country_code):' );
+			set_transient( $cache_key, $fallback, self::get_geo_failure_ttl() );
+			return $fallback;
+		}
+
+		$country = strtolower( $body['country_code'] );
+
+		// Validate the external API response is a valid 2-letter country code.
+		if ( ! preg_match( '/^[a-z]{2}$/', $country ) ) {
+			self::srfm_log( $country, 'SRFM geo lookup failed (invalid country code):' );
+			set_transient( $cache_key, $fallback, self::get_geo_failure_ttl() );
+			return $fallback;
+		}
+
+		set_transient( $cache_key, $country, DAY_IN_SECONDS );
+
+		return $country;
 	}
+
+	/**
+	 * Read a visitor country code from a CDN / server geo header, if present.
+	 *
+	 * Many hosts sit behind Cloudflare, CloudFront or a geo-aware web server that
+	 * injects the visitor's country as a request header. This is free, instant,
+	 * per-visitor and works on full-page-cached sites, so we prefer it over an
+	 * outbound API call. Returns '' when no usable header is present.
+	 *
+	 * NOTE: these headers are client-spoofable when the site is NOT actually behind
+	 * the named CDN/proxy. The value is used only as a phone-field UI default (the
+	 * pre-selected flag), never for access control, so spoofing has no security
+	 * impact here — at worst a visitor sees a different default country.
+	 *
+	 * @since 2.11.1
+	 * @return string Lowercase 2-letter country code, or '' when unavailable.
+	 */
+	private static function get_cdn_country() {
+		$headers = [
+			'HTTP_CF_IPCOUNTRY',              // Cloudflare.
+			'HTTP_CLOUDFRONT_VIEWER_COUNTRY', // AWS CloudFront.
+			'GEOIP_COUNTRY_CODE',             // Apache/Nginx mod_geoip / MaxMind.
+			'HTTP_X_GEO_COUNTRY',             // Some CDNs / reverse proxies.
+			'HTTP_X_COUNTRY_CODE',            // Some CDNs.
+		];
+
+		foreach ( $headers as $header ) {
+			if ( empty( $_SERVER[ $header ] ) ) {
+				continue;
+			}
+
+			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Validated by the regex below.
+			$code = strtolower( trim( sanitize_text_field( wp_unslash( $_SERVER[ $header ] ) ) ) );
+
+			// Cloudflare sends 'xx' for unknown and 't1' for Tor; reject non-ISO values.
+			if ( preg_match( '/^[a-z]{2}$/', $code ) && 'xx' !== $code && 't1' !== $code ) {
+				return $code;
+			}
+		}
+
+		/**
+		 * Filters the CDN-derived visitor country code, before the ipapi.co fallback.
+		 *
+		 * Lets sites short-circuit detection with a server-side country code (e.g.
+		 * from a custom header) without any outbound API call.
+		 *
+		 * @since 2.11.1
+		 *
+		 * @param string $code Lowercase 2-letter country code, or '' if none found.
+		 */
+		return apply_filters( 'srfm_cdn_country', '' );
+	}
+
+	/**
+	 * TTL (in seconds) for caching a failed geo lookup.
+	 *
+	 * Short by default so a transient blip (rate-limit, timeout) self-heals on the
+	 * next visit instead of pinning the fallback country for a full hour, while
+	 * still preventing per-request retry storms. Filterable via `srfm_geo_failure_ttl`.
+	 *
+	 * @since 2.11.1
+	 * @return int
+	 */
+	private static function get_geo_failure_ttl() {
+		return self::get_integer_value( apply_filters( 'srfm_geo_failure_ttl', 5 * MINUTE_IN_SECONDS ) );
+	}
+
 }

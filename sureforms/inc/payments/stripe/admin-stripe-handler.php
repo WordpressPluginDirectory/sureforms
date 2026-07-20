@@ -47,6 +47,8 @@ class Admin_Stripe_Handler {
 		add_action( 'wp_ajax_srfm_stripe_pause_subscription', [ $this, 'ajax_pause_subscription' ] );
 		// Hook into unified refund filter system.
 		add_filter( 'srfm_process_transaction_refund', [ $this, 'process_stripe_refund' ], 10, 2 );
+		// Hook into unified subscription cancellation filter system.
+		add_filter( 'srfm_process_subscription_cancellation', [ $this, 'process_stripe_subscription_cancellation' ], 10, 2 );
 		// Admin notices.
 		add_action( 'admin_notices', [ $this, 'webhook_configuration_notice' ] );
 	}
@@ -87,7 +89,7 @@ class Admin_Stripe_Handler {
 		// Get payment record.
 		$payment = Payments::get( $payment_id );
 
-		$this->payment_mode = $payment['payment_mode'] ?? 'test';
+		$this->payment_mode = ! empty( $payment['mode'] ) && is_string( $payment['mode'] ) ? $payment['mode'] : 'test';
 		if ( ! $payment ) {
 			wp_send_json_error( [ 'message' => esc_html__( 'Payment not found in the database.', 'sureforms' ) ] );
 		}
@@ -101,21 +103,87 @@ class Admin_Stripe_Handler {
 			wp_send_json_error( [ 'message' => esc_html__( 'Subscription ID not found.', 'sureforms' ) ] );
 		}
 
-		// Cancel the subscription.
-		$cancel_result = $this->cancel_subscription( $payment['subscription_id'] );
-		if ( ! $cancel_result ) {
-			wp_send_json_error( [ 'message' => esc_html__( 'Subscription cancellation failed.', 'sureforms' ) ] );
+		// Cancel via the gateway-agnostic filter so the payment's OWN gateway (Stripe or
+		// PayPal) performs the cancellation. Previously this called the Stripe API directly,
+		// which failed for PayPal subscriptions cancelled from the admin screen. Both gateways
+		// hook 'srfm_process_subscription_cancellation' (Stripe + PayPal), matching the
+		// frontend cancellation path.
+		$cancel_result = apply_filters(
+			'srfm_process_subscription_cancellation',
+			[
+				'success' => false,
+				'message' => __( 'Cancellation is not supported for this payment gateway.', 'sureforms' ),
+			],
+			$payment
+		);
+
+		if ( empty( $cancel_result['success'] ) ) {
+			wp_send_json_error(
+				[
+					'message' => ! empty( $cancel_result['message'] ) && is_string( $cancel_result['message'] )
+						? esc_html( $cancel_result['message'] )
+						: esc_html__( 'Subscription cancellation failed.', 'sureforms' ),
+				]
+			);
 		}
 
-		// Get current logs and add cancel log entry.
-		$current_logs = Helper::get_array_value( $payment['log'] );
+		// The gateway callback (Stripe/PayPal) is the single source of truth: it has already
+		// cancelled at the gateway AND persisted subscription_status + the "Subscription Canceled"
+		// activity log. Just report success here — mirroring the frontend cancel path — so we don't
+		// write the DB a second time or append a duplicate log entry.
+		wp_send_json_success(
+			[
+				'message' => ! empty( $cancel_result['message'] ) && is_string( $cancel_result['message'] )
+					? esc_html( $cancel_result['message'] )
+					: esc_html__( 'Subscription cancelled successfully.', 'sureforms' ),
+			]
+		);
+	}
 
-		// Build log messages array.
+	/**
+	 * Process Stripe subscription cancellation via filter system.
+	 *
+	 * Filter callback for 'srfm_process_subscription_cancellation'.
+	 * Used by both admin and frontend to cancel Stripe subscriptions.
+	 *
+	 * @since 2.8.0
+	 * @param array<string,mixed> $result  Default result array.
+	 * @param array<string,mixed> $payment Payment record from database.
+	 * @return array<string,mixed> Result with success status and message.
+	 */
+	public function process_stripe_subscription_cancellation( $result, $payment ) {
+		// Process Stripe payments. Stripe is the only gateway in the free plugin, and the
+		// `gateway` column defaults to '' for legacy/imported rows — so an empty gateway is
+		// treated as Stripe. Only an explicitly different gateway (e.g. 'paypal') is skipped.
+		if ( ! empty( $payment['gateway'] ) && 'stripe' !== $payment['gateway'] ) {
+			return $result;
+		}
+
+		if ( empty( $payment['subscription_id'] ) || ! is_string( $payment['subscription_id'] ) ) {
+			return [
+				'success' => false,
+				'message' => __( 'Subscription ID not found.', 'sureforms' ),
+			];
+		}
+
+		$subscription_id    = $payment['subscription_id'];
+		$this->payment_mode = ! empty( $payment['mode'] ) && is_string( $payment['mode'] ) ? $payment['mode'] : 'test';
+
+		$cancel_result = $this->cancel_subscription( $subscription_id );
+		if ( ! $cancel_result ) {
+			return [
+				'success' => false,
+				'message' => __( 'Subscription cancellation failed.', 'sureforms' ),
+			];
+		}
+
+		// Build log entry.
+		$current_logs = Helper::get_array_value( $payment['log'] );
 		$log_messages = [
 			sprintf(
 				/* translators: %s: Stripe subscription ID */
 				__( 'Subscription ID: %s', 'sureforms' ),
-				$payment['subscription_id']
+				$subscription_id
 			),
 			sprintf(
 				/* translators: %s: payment gateway name */
@@ -132,31 +200,29 @@ class Admin_Stripe_Handler {
 				__( 'Canceled by: %s', 'sureforms' ),
 				wp_get_current_user()->display_name
 			),
-			__( 'Note: The subscription has been permanently canceled. The customer will no longer be charged and will lose access to subscription benefits.', 'sureforms' ),
 		];
 
-		// Create new log entry.
-		$new_log        = [
+		$current_logs[] = [
 			'title'      => __( 'Subscription Canceled', 'sureforms' ),
 			'created_at' => current_time( 'mysql' ),
 			'messages'   => $log_messages,
 		];
-		$current_logs[] = $new_log;
 
-		// Update database status to canceled (following WPForms pattern).
-		$updated = Payments::update(
+		$payment_id = isset( $payment['id'] ) && is_numeric( $payment['id'] ) ? absint( $payment['id'] ) : 0;
+		// Preserve the transaction `status` so the admin Refund option stays enabled
+		// after the customer cancels from the My Account page.
+		Payments::update(
 			$payment_id,
 			[
 				'subscription_status' => 'canceled',
-				'status'              => 'canceled',
 				'log'                 => $current_logs,
 			]
 		);
-		if ( ! $updated ) {
-			wp_send_json_error( [ 'message' => esc_html__( 'Failed to update subscription status in database.', 'sureforms' ) ] );
-		}
 
-		wp_send_json_success( [ 'message' => esc_html__( 'Subscription canceled successfully!', 'sureforms' ) ] );
+		return [
+			'success' => true,
+			'message' => __( 'Subscription cancelled successfully.', 'sureforms' ),
+		];
 	}
 
 	/**
@@ -202,7 +268,7 @@ class Admin_Stripe_Handler {
 		}
 
 		try {
-			$this->payment_mode = $payment['payment_mode'] ?? 'test';
+			$this->payment_mode = ! empty( $payment['mode'] ) && is_string( $payment['mode'] ) ? $payment['mode'] : 'test';
 
 			// Detect subscription payments and route to specialized handler (following WPForms pattern).
 			if ( isset( $payment['type'], $payment['subscription_id'] ) && ! empty( $payment['type'] ) && ! empty( $payment['subscription_id'] ) ) {
@@ -394,7 +460,7 @@ class Admin_Stripe_Handler {
 			wp_send_json_error( [ 'message' => esc_html__( 'Payment not found in the database.', 'sureforms' ) ] );
 		}
 
-		$this->payment_mode = $payment['payment_mode'] ?? 'test';
+		$this->payment_mode = ! empty( $payment['mode'] ) && is_string( $payment['mode'] ) ? $payment['mode'] : 'test';
 
 		// Validate it's a subscription payment.
 		if ( empty( $payment['type'] ) || 'subscription' !== $payment['type'] ) {
@@ -767,7 +833,9 @@ class Admin_Stripe_Handler {
 
 			// Step 3: Verify subscription payment status.
 			// Note: 'active' status is used for subscription records, while 'succeeded' is used for one-time payments.
-			$refundable_statuses = [ 'active', 'succeeded', 'partially_refunded' ];
+			// 'canceled' is accepted because the initial charge on a canceled subscription is still refundable
+			// (and historical rows persisted with `status='canceled'` should remain refundable).
+			$refundable_statuses = [ 'active', 'succeeded', 'partially_refunded', 'canceled' ];
 			if ( empty( $payment['status'] ) || ! in_array( $payment['status'], $refundable_statuses, true ) ) {
 				return [
 					'success' => false,
@@ -948,7 +1016,7 @@ class Admin_Stripe_Handler {
 			return $this->create_refund_by_charge( $payment, $charge_id, $refund_amount, $refund_notes );
 		}
 
-		throw new \Exception( __( 'Unable to determine the appropriate refund method for this subscription payment.', 'sureforms' ) );
+		throw new \Exception( esc_html__( 'Unable to determine the appropriate refund method for this subscription payment.', 'sureforms' ) );
 	}
 
 	/**

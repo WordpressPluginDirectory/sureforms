@@ -771,15 +771,9 @@ class Admin_Handler {
 
 		// Add status filter - map frontend status to database status.
 		if ( ! empty( $status ) ) {
-			$db_status = $this->map_frontend_status_to_db( $status );
-			if ( $db_status ) {
-				$where_conditions[] = [
-					[
-						'key'     => 'status',
-						'compare' => '=',
-						'value'   => $db_status,
-					],
-				];
+			$status_clause = $this->build_status_where_clause( $status );
+			if ( ! empty( $status_clause ) ) {
+				$where_conditions[] = $status_clause;
 			}
 		}
 
@@ -878,7 +872,7 @@ class Admin_Handler {
 		}
 
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table query for search, table name is validated and cannot be parameterized with prepare().
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Custom table query for search; table name from get_tablename() and validated (not user input); cannot be parameterized with prepare().
 		$results = $wpdb->get_col(
 			$wpdb->prepare(
 				"SELECT DISTINCT id FROM {$payments_table}
@@ -1050,15 +1044,9 @@ class Admin_Handler {
 		}
 
 		if ( ! empty( $status ) ) {
-			$db_status = $this->map_frontend_status_to_db( $status );
-			if ( $db_status ) {
-				$where_conditions[] = [
-					[
-						'key'     => 'status',
-						'compare' => '=',
-						'value'   => $db_status,
-					],
-				];
+			$status_clause = $this->build_status_where_clause( $status );
+			if ( ! empty( $status_clause ) ) {
+				$where_conditions[] = $status_clause;
 			}
 		}
 
@@ -1118,6 +1106,51 @@ class Admin_Handler {
 		}
 
 		return Payments::get_total_main_payments_by_status( 'all', 0, $where_conditions );
+	}
+
+	/**
+	 * Build the WHERE clause group for the frontend status filter.
+	 *
+	 * For 'cancelled' the parent subscription row keeps its transaction
+	 * `status` (e.g. 'succeeded'/'active') after cancellation, with the
+	 * lifecycle tracked on `subscription_status`. To keep canceled
+	 * subscriptions findable via the dropdown — and stay backward
+	 * compatible with legacy rows that still have `status='canceled'` — we
+	 * match either column.
+	 *
+	 * @param string $frontend_status Status value from the frontend filter.
+	 * @since 2.9.0
+	 * @return array<int|string,mixed> WHERE clause group, or empty array if invalid.
+	 */
+	private function build_status_where_clause( $frontend_status ) {
+		$db_status = $this->map_frontend_status_to_db( $frontend_status );
+		if ( ! $db_status ) {
+			return [];
+		}
+
+		if ( 'canceled' === $db_status ) {
+			return [
+				'RELATION' => 'OR',
+				[
+					'key'     => 'status',
+					'compare' => '=',
+					'value'   => 'canceled',
+				],
+				[
+					'key'     => 'subscription_status',
+					'compare' => '=',
+					'value'   => 'canceled',
+				],
+			];
+		}
+
+		return [
+			[
+				'key'     => 'status',
+				'compare' => '=',
+				'value'   => $db_status,
+			],
+		];
 	}
 
 	/**

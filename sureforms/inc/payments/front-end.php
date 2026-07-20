@@ -9,7 +9,9 @@
 namespace SRFM\Inc\Payments;
 
 use SRFM\Inc\Database\Tables\Payments;
+use SRFM\Inc\Field_Validation;
 use SRFM\Inc\Payments\Stripe\Stripe_Helper;
+use SRFM\Inc\Submit_Token;
 use SRFM\Inc\Traits\Get_Instance;
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -69,18 +71,22 @@ class Front_End {
 	 * @return void
 	 */
 	public function create_payment_intent() {
-		// Verify nonce.
-		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['nonce'] ?? '' ) ), 'srfm_payment_nonce' ) ) {
-			wp_send_json_error( __( 'Invalid nonce.', 'sureforms' ) );
+		// Verify submit token.
+		$token   = isset( $_POST['token'] ) ? sanitize_text_field( wp_unslash( $_POST['token'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- HMAC token verification replaces nonce.
+		$form_id = isset( $_POST['form_id'] ) && is_numeric( $_POST['form_id'] ) ? absint( $_POST['form_id'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+		if ( ! Submit_Token::verify( $token, $form_id ) ) {
+			wp_send_json_error( __( 'Security verification failed. Please refresh the page and try again.', 'sureforms' ) );
 		}
 
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- Verified via Submit_Token::verify() above.
 		$amount         = intval( $_POST['amount'] ?? 0 );
 		$currency       = sanitize_text_field( wp_unslash( $_POST['currency'] ?? 'usd' ) );
 		$description    = sanitize_text_field( wp_unslash( $_POST['description'] ?? 'SureForms Payment' ) );
 		$block_id       = sanitize_text_field( wp_unslash( $_POST['block_id'] ?? '' ) );
 		$customer_email = sanitize_email( wp_unslash( $_POST['customer_email'] ?? '' ) );
 		$customer_name  = sanitize_text_field( wp_unslash( $_POST['customer_name'] ?? '' ) );
-		$form_id        = intval( $_POST['form_id'] ?? 0 );
+		$form_id        = isset( $_POST['form_id'] ) && is_numeric( $_POST['form_id'] ) ? absint( $_POST['form_id'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 		if ( $amount <= 0 ) {
 			wp_send_json_error( __( 'Invalid payment amount.', 'sureforms' ) );
@@ -88,11 +94,14 @@ class Front_End {
 
 		$amount_processed_with_currency = Stripe_Helper::amount_from_stripe_format( $amount, $currency );
 		// Validate payment amount against stored form configuration.
-		if ( $form_id > 0 && ! empty( $block_id ) ) {
-			$validation_result = Payment_Helper::validate_payment_amount( $amount_processed_with_currency, $currency, $form_id, $block_id );
-			if ( ! $validation_result['valid'] ) {
-				wp_send_json_error( $validation_result['message'] );
-			}
+		if ( $form_id <= 0 || empty( $block_id ) ) {
+			wp_send_json_error( __( 'Invalid form configuration.', 'sureforms' ) );
+		}
+
+		// BOTH MODE: pass 'one-time' so the validator uses the correct per-type amount config.
+		$validation_result = Payment_Helper::validate_payment_amount( $amount_processed_with_currency, $currency, $form_id, $block_id, 'one-time' );
+		if ( ! $validation_result['valid'] ) {
+			wp_send_json_error( $validation_result['message'] );
 		}
 
 		// Validate customer email (required for one-time payments).
@@ -127,18 +136,19 @@ class Front_End {
 
 			// Create payment intent with confirm: true for immediate processing.
 			$payment_intent_data = [
-				'secret_key'                => $secret_key,
-				'amount'                    => $amount,
-				'currency'                  => strtolower( $currency ),
-				'description'               => $description,
-				'confirm'                   => false, // Will be confirmed by frontend.
-				'receipt_email'             => $customer_email,
-				'license_key'               => $license_key,
-				'automatic_payment_methods' => [
-					'enabled'         => true,
-					'allow_redirects' => 'never',
-				],
-				'metadata'                  => [
+				'secret_key'           => $secret_key,
+				'amount'               => $amount,
+				'currency'             => strtolower( $currency ),
+				'description'          => $description,
+				'confirm'              => false, // Will be confirmed by frontend.
+				'receipt_email'        => $customer_email,
+				'license_key'          => $license_key,
+				// One-time payments use manual capture; methods that don't support it (Bacs, Link, Cash App, BNPL) make
+				// Stripe reject the deferred Elements session in live mode, and an automatic-payment-methods intent can't
+				// be confirmed by the card-scoped client Element. Pin to card so the client Element, this payload, and the
+				// middleware intent all agree (Apple/Google Pay are still surfaced through 'card').
+				'payment_method_types' => [ 'card' ],
+				'metadata'             => [
 					'source'          => 'SureForms',
 					'block_id'        => $block_id,
 					'original_amount' => $amount,
@@ -211,14 +221,17 @@ class Front_End {
 			}
 
 			// Store payment intent metadata in transient for verification.
+			// active_type binds this intent to the one-time flow so a tampered
+			// submission cannot replay it through the subscription submit path.
 			Payment_Helper::store_payment_intent_metadata(
 				$block_id,
 				$payment_intent['id'],
 				[
-					'form_id'  => $form_id,
-					'block_id' => $block_id,
-					'amount'   => $amount_processed_with_currency,
-					'currency' => strtolower( $currency ),
+					'form_id'     => $form_id,
+					'block_id'    => $block_id,
+					'amount'      => $amount_processed_with_currency,
+					'currency'    => strtolower( $currency ),
+					'active_type' => 'one-time',
 				]
 			);
 
@@ -244,10 +257,14 @@ class Front_End {
 	 * @return void
 	 */
 	public function create_subscription_intent() {
-		// Verify nonce.
-		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['nonce'] ?? '' ) ), 'srfm_payment_nonce' ) ) {
-			wp_send_json_error( __( 'Security check failed.', 'sureforms' ) );
+		// Verify submit token.
+		$token   = isset( $_POST['token'] ) ? sanitize_text_field( wp_unslash( $_POST['token'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- HMAC token verification replaces nonce.
+		$form_id = isset( $_POST['form_id'] ) && is_numeric( $_POST['form_id'] ) ? absint( $_POST['form_id'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+		if ( ! Submit_Token::verify( $token, $form_id ) ) {
+			wp_send_json_error( __( 'Security verification failed. Please refresh the page and try again.', 'sureforms' ) );
 		}
+
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- Verified via Submit_Token::verify() above.
 
 		// Validate required fields like simple-stripe-subscriptions.
 		$required_fields = [ 'amount', 'currency', 'description', 'block_id', 'interval', 'plan_name' ];
@@ -267,7 +284,9 @@ class Front_End {
 		$plan_name             = sanitize_text_field( wp_unslash( $_POST['plan_name'] ?? 'Subscription Plan' ) );
 		$customer_email        = sanitize_email( wp_unslash( $_POST['customer_email'] ?? '' ) );
 		$customer_name         = sanitize_text_field( wp_unslash( $_POST['customer_name'] ?? '' ) );
-		$form_id               = intval( $_POST['form_id'] ?? 0 );
+		$form_id               = isset( $_POST['form_id'] ) && is_numeric( $_POST['form_id'] ) ? absint( $_POST['form_id'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 		// Validate customer email (required for all subscriptions).
 		if ( empty( $customer_email ) || ! is_email( $customer_email ) ) {
@@ -281,11 +300,14 @@ class Front_End {
 
 		$amount_processed_with_currency = Stripe_Helper::amount_from_stripe_format( $amount, $currency );
 		// Validate payment amount against stored form configuration.
-		if ( $form_id > 0 && ! empty( $block_id ) ) {
-			$validation_result = Payment_Helper::validate_payment_amount( $amount_processed_with_currency, $currency, $form_id, $block_id );
-			if ( ! $validation_result['valid'] ) {
-				wp_send_json_error( $validation_result['message'] );
-			}
+		if ( $form_id <= 0 || empty( $block_id ) ) {
+			wp_send_json_error( __( 'Invalid form configuration.', 'sureforms' ) );
+		}
+
+		// BOTH MODE: pass 'subscription' so the validator uses the correct per-type amount config.
+		$validation_result = Payment_Helper::validate_payment_amount( $amount_processed_with_currency, $currency, $form_id, $block_id, 'subscription' );
+		if ( ! $validation_result['valid'] ) {
+			wp_send_json_error( $validation_result['message'] );
 		}
 
 		// Validate amount like simple-stripe-subscriptions.
@@ -294,9 +316,23 @@ class Front_End {
 		}
 
 		// Validate interval like simple-stripe-subscriptions.
-		$valid_intervals = [ 'day', 'week', 'month', 'year' ];
+		// BOTH MODE: 'quarter' is a valid editor option but was missing from the allow-list,
+		// causing Quarterly subscriptions to be rejected at submit time.
+		$valid_intervals = [ 'day', 'week', 'month', 'quarter', 'year' ];
 		if ( ! in_array( $subscription_interval, $valid_intervals, true ) ) {
 			wp_send_json_error( __( 'Invalid billing interval', 'sureforms' ) );
+		}
+
+		// Reject when the submitted interval does not match what the admin saved in
+		// the form's stored block config. Admin picks a single interval in the editor;
+		// the end user has no chooser. So a divergence here is always tampering — the
+		// data attribute the server itself rendered has been altered before submit.
+		$stored_block_config = Field_Validation::get_or_migrate_block_config_for_legacy_form( $form_id );
+		if ( is_array( $stored_block_config ) && isset( $stored_block_config[ $block_id ] ) && is_array( $stored_block_config[ $block_id ] ) ) {
+			$stored_interval = $stored_block_config[ $block_id ]['subscription_interval'] ?? '';
+			if ( ! empty( $stored_interval ) && $stored_interval !== $subscription_interval ) {
+				wp_send_json_error( __( 'Billing interval does not match the form configuration.', 'sureforms' ) );
+			}
 		}
 
 		try {
@@ -397,6 +433,8 @@ class Front_End {
 			}
 
 			// Store subscription metadata in transient for verification.
+			// active_type binds this intent to the subscription flow so a tampered
+			// submission cannot replay it through the one-time submit path.
 			Payment_Helper::store_payment_intent_metadata(
 				$block_id,
 				$payment_intent_id,
@@ -406,6 +444,7 @@ class Front_End {
 					'amount'          => $amount_processed_with_currency,
 					'currency'        => strtolower( $currency ),
 					'subscription_id' => $subscription_id,
+					'active_type'     => 'subscription',
 				]
 			);
 
@@ -571,7 +610,8 @@ class Front_End {
 		$setup_intent_id = ! empty( $subscription_value['setupIntent'] ) && is_string( $subscription_value['setupIntent'] ) ? $subscription_value['setupIntent'] : '';
 
 		// Verify payment intent with comprehensive validation including form data.
-		$verification_result = Payment_Helper::verify_payment_intent( $block_id, $setup_intent_id, $form_data );
+		// BOTH MODE: pass 'subscription' so per-type amount config is used for verification.
+		$verification_result = Payment_Helper::verify_payment_intent( $block_id, $setup_intent_id, $form_data, 'subscription' );
 
 		if ( false === $verification_result['valid'] ) {
 			return [
@@ -622,6 +662,25 @@ class Front_End {
 							'default_payment_method' => $setup_intent['payment_method'],
 							'collection_method'      => 'charge_automatically',
 						];
+
+						// Override interval + billing cycles with the values stored in the
+						// form's block config. These come from the data attributes the
+						// server itself rendered, so they cannot legitimately diverge from
+						// the admin's saved subscriptionPlan. Trusting the submitted values
+						// would let an attacker DevTools-flip cancel_at to 'ongoing'.
+						$form_id_for_config = isset( $form_data['form-id'] ) && is_numeric( $form_data['form-id'] ) ? intval( $form_data['form-id'] ) : 0;
+						if ( $form_id_for_config > 0 && ! empty( $block_id ) ) {
+							$stored_block_config = Field_Validation::get_or_migrate_block_config_for_legacy_form( $form_id_for_config );
+							if ( is_array( $stored_block_config ) && isset( $stored_block_config[ $block_id ] ) && is_array( $stored_block_config[ $block_id ] ) ) {
+								$stored_payment_config = $stored_block_config[ $block_id ];
+								if ( isset( $stored_payment_config['subscription_interval'] ) ) {
+									$subscription_value['subscriptionInterval'] = $stored_payment_config['subscription_interval'];
+								}
+								if ( isset( $stored_payment_config['subscription_billing_cycles'] ) ) {
+									$subscription_value['subscriptionBillingCycles'] = $stored_payment_config['subscription_billing_cycles'];
+								}
+							}
+						}
 
 						// Calculate cancel_at timestamp based on billing cycles and interval.
 						$cancel_at = $this->prepare_cancel_at( $subscription_value );
@@ -739,6 +798,17 @@ class Front_End {
 			$currency            = isset( $paid_invoice['currency'] ) && ! empty( $paid_invoice['currency'] ) ? $paid_invoice['currency'] : 'usd';
 			$form_id             = isset( $form_data['form-id'] ) && ! empty( $form_data['form-id'] ) ? $form_data['form-id'] : 0;
 			$subscription_status = isset( $subscription['status'] ) && ! empty( $subscription['status'] ) && is_string( $subscription['status'] ) ? $subscription['status'] : '';
+
+			// Defense-in-depth: re-validate the amount Stripe actually invoiced against the form's
+			// server-side configuration. The recurring price is the invoiced amount, so an
+			// underpayment here would otherwise repeat every billing cycle.
+			$charged_amount    = Stripe_Helper::amount_from_stripe_format( is_numeric( $amount ) ? (int) $amount : 0, is_string( $currency ) ? $currency : 'usd' );
+			$charge_validation = Payment_Helper::validate_amount_against_config( $block_id, is_numeric( $form_id ) ? (int) $form_id : 0, $form_data, $charged_amount, 'subscription' );
+			if ( false === $charge_validation['valid'] ) {
+				return [
+					'error' => $charge_validation['message'],
+				];
+			}
 
 			$invoice_status = isset( $paid_invoice['status'] ) && ! empty( $paid_invoice['status'] ) && is_string( $paid_invoice['status'] ) ? $paid_invoice['status'] : '';
 
@@ -1086,7 +1156,8 @@ class Front_End {
 			}
 
 			// Verify payment intent with comprehensive validation including form data.
-			$verification_result = Payment_Helper::verify_payment_intent( $block_id, $payment_id, $form_data );
+			// BOTH MODE: pass 'one-time' so per-type amount config is used for verification.
+			$verification_result = Payment_Helper::verify_payment_intent( $block_id, $payment_id, $form_data, 'one-time' );
 
 			if ( false === $verification_result['valid'] ) {
 				return [
@@ -1165,6 +1236,16 @@ class Front_End {
 			$confirm_payment_amount   = is_array( $confirmed_payment_intent ) && isset( $confirmed_payment_intent['amount'] ) && ! empty( $confirmed_payment_intent['amount'] ) ? intval( $confirmed_payment_intent['amount'] ) : 0;
 			$confirm_payment_currency = is_array( $confirmed_payment_intent ) && isset( $confirmed_payment_intent['currency'] ) && ! empty( $confirmed_payment_intent['currency'] ) ? (string) $confirmed_payment_intent['currency'] : 'usd';
 			$confirm_payment_id       = is_array( $confirmed_payment_intent ) && isset( $confirmed_payment_intent['id'] ) && ! empty( $confirmed_payment_intent['id'] ) ? (string) $confirmed_payment_intent['id'] : '';
+
+			// Defense-in-depth: re-validate the amount Stripe actually charged against the form's
+			// server-side configuration — not only the amount recorded when the intent was created.
+			$charged_amount    = Stripe_Helper::amount_from_stripe_format( $confirm_payment_amount, $confirm_payment_currency );
+			$charge_validation = Payment_Helper::validate_amount_against_config( $block_id, $form_id, $form_data, $charged_amount, 'one-time' );
+			if ( false === $charge_validation['valid'] ) {
+				return [
+					'error' => $charge_validation['message'],
+				];
+			}
 
 			// Extract customer data.
 			$customer_data = $this->extract_customer_data( $payment_value );
@@ -1470,10 +1551,53 @@ class Front_End {
 
 			// Update the payment entry with entry_id using Payments class.
 			$updated = Payments::update( $payment_entry_id, [ 'entry_id' => $entry_id ] );
-			return $updated ? true : false;
+
+			if ( $updated ) {
+				$this->maybe_fire_payment_completed( $payment_entry_id );
+				return true;
+			}
+
+			return false;
 		}
 
 		return false;
+	}
+
+	/**
+	 * Fire the `srfm_payment_completed` action for a freshly linked payment.
+	 *
+	 * Called right after a payment row is linked to its form entry, so `entry_id`
+	 * (and therefore the submitting user) is resolvable. Gated on the `succeeded`
+	 * status so consumers never grant access for pending, failed or refunded
+	 * payments.
+	 *
+	 * @param int $payment_entry_id Primary key of the linked `sureforms_payments` row.
+	 * @since 2.12.0
+	 * @return void
+	 */
+	private function maybe_fire_payment_completed( $payment_entry_id ) {
+		$payment = Payments::get( $payment_entry_id );
+		if ( ! is_array( $payment ) ) {
+			return;
+		}
+
+		$status = ! empty( $payment['status'] ) && is_string( $payment['status'] ) ? $payment['status'] : '';
+		if ( 'succeeded' !== $status ) {
+			return;
+		}
+
+		/**
+		 * Fires when a SureForms payment reaches the `succeeded` state and has been
+		 * linked to its form entry — a one-time payment, or the initial charge of a
+		 * subscription.
+		 *
+		 * @param array<string, mixed> $payment Payment record (a `sureforms_payments` row).
+		 * @param array<string, mixed> $context Resolved context: form_id, entry_id,
+		 *                                       user_id (0 for guests), customer_email,
+		 *                                       type, gateway, mode.
+		 * @since 2.12.0
+		 */
+		do_action( 'srfm_payment_completed', $payment, Payment_Helper::build_payment_context( $payment ) );
 	}
 
 	/**
@@ -1500,7 +1624,13 @@ class Front_End {
 
 			// Update the payment entry with entry_id using Payments class.
 			$updated = Payments::update( $payment_entry_id, [ 'entry_id' => $entry_id ] );
-			return $updated ? true : false;
+
+			if ( $updated ) {
+				$this->maybe_fire_payment_completed( $payment_entry_id );
+				return true;
+			}
+
+			return false;
 		}
 
 		return false;

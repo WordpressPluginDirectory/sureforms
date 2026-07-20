@@ -8,6 +8,7 @@
 
 namespace SRFM\Inc;
 
+use SRFM\Inc\Compatibility\Multilingual\String_Translator;
 use SRFM\Inc\Database\Tables\Entries;
 use SRFM\Inc\Traits\Get_Instance;
 
@@ -132,6 +133,28 @@ class Form_Restriction {
 			$entries_count = 0; // Ensure entries count is a non-negative integer.
 		}
 
+		/**
+		 * Filter the count of entries used to evaluate the Maximum Number of Entries
+		 * cap. Allows extensions (e.g. SureForms Pro's Recurring Entry Limit) to
+		 * substitute a window-scoped count — entries since the start of today /
+		 * the current week / month / year — in place of the lifetime count.
+		 *
+		 * Returning a value greater than `$entries_count` will trip the cap sooner;
+		 * returning a smaller value will defer it. Non-integer return values are
+		 * coerced back to a non-negative integer.
+		 *
+		 * @param int                  $entries_count    Lifetime entry count for the form.
+		 * @param int                  $form_id          The ID of the form.
+		 * @param array<string, mixed> $form_restriction The form restriction settings.
+		 * @since 2.8.2
+		 */
+		$entries_count = apply_filters( 'srfm_form_restriction_entries_count', $entries_count, $form_id, $form_restriction );
+
+		// Always coerce to a non-negative integer — covers both non-int returns
+		// from a misbehaving extension AND negative-int returns that would
+		// otherwise silently disable the cap (e.g. -5 >= 100 is false).
+		$entries_count = max( 0, (int) $entries_count );
+
 		return $entries_count >= $max_entries;
 	}
 
@@ -233,6 +256,10 @@ class Form_Restriction {
 		// Get the scheduling state and appropriate message.
 		$scheduling_state         = self::get_form_scheduling_state( $form_restriction );
 		$form_restriction_message = self::get_restriction_message_by_state( $scheduling_state, $form_restriction );
+
+		// Translate the restriction message via the active multilingual provider
+		// (no-op when no WPML/Polylang is installed).
+		$form_restriction_message = String_Translator::get_instance()->translate_restriction_message( (int) $form_id, $form_restriction_message );
 
 		$form_restriction_message = apply_filters( 'srfm_form_restriction_message', $form_restriction_message, $form_id, $form_restriction );
 

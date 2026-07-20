@@ -67,7 +67,9 @@ class Stripe_Webhook {
 				'callback'            => function() {
 					$this->webhook_listener( 'test' );
 				},
-				'permission_callback' => '__return_true',
+				'permission_callback' => function() {
+					return $this->validate_webhook_permission( 'test' );
+				},
 			]
 		);
 
@@ -80,14 +82,56 @@ class Stripe_Webhook {
 				'callback'            => function() {
 					$this->webhook_listener( 'live' );
 				},
-				'permission_callback' => '__return_true',
+				'permission_callback' => function() {
+					return $this->validate_webhook_permission( 'live' );
+				},
 			]
 		);
 	}
 
 	/**
+	 * Validates webhook permission by verifying the Stripe signature locally.
+	 * Used as the permission_callback for webhook REST endpoints.
+	 *
+	 * @param string $mode The payment mode ('test' or 'live').
+	 * @since 2.6.0
+	 * @return true|\WP_Error
+	 */
+	public function validate_webhook_permission( $mode ) {
+		$payload = file_get_contents( 'php://input' );
+		// phpcs:disable
+		$sig_header = ! empty( $_SERVER['HTTP_STRIPE_SIGNATURE'] ) && is_string( $_SERVER['HTTP_STRIPE_SIGNATURE'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_STRIPE_SIGNATURE'] ) ) : '';
+		// phpcs:enable
+
+		if ( empty( $payload ) || empty( $sig_header ) ) {
+			return new \WP_Error( 'srfm_webhook_unauthorized', __( 'Missing webhook payload or signature.', 'sureforms' ), [ 'status' => 401 ] );
+		}
+
+		$settings = Stripe_Helper::get_all_stripe_settings();
+		if ( ! is_array( $settings ) ) {
+			$settings = [];
+		}
+
+		$this->mode = in_array( $mode, [ 'test', 'live' ], true ) ? $mode : 'test';
+
+		$secret_key     = 'live' === $this->mode ? 'webhook_live_secret' : 'webhook_test_secret';
+		$webhook_secret = isset( $settings[ $secret_key ] ) && is_string( $settings[ $secret_key ] ) ? (string) $settings[ $secret_key ] : '';
+
+		if ( empty( $webhook_secret ) ) {
+			return new \WP_Error( 'srfm_webhook_unauthorized', __( 'Webhook secret not configured.', 'sureforms' ), [ 'status' => 401 ] );
+		}
+
+		if ( ! $this->verify_stripe_signature_locally( $payload, $sig_header, $webhook_secret ) ) {
+			return new \WP_Error( 'srfm_webhook_unauthorized', __( 'Invalid webhook signature.', 'sureforms' ), [ 'status' => 401 ] );
+		}
+
+		return true;
+	}
+
+	/**
 	 * Validates the Stripe signature for webhook requests through middleware.
 	 *
+	 * @deprecated 2.6.0 Use validate_webhook_permission() instead. Signature is now verified locally in the permission callback.
 	 * @param string|null $mode The payment mode ('test' or 'live'). If null, uses setting.
 	 * @since 2.0.0
 	 * @return array<string, mixed>|bool
@@ -206,12 +250,18 @@ class Stripe_Webhook {
 	 * @return void
 	 */
 	public function webhook_listener( $mode = null ) {
-		$event = $this->validate_stripe_signature( $mode );
+		// Signature already verified in permission callback (validate_webhook_permission).
+		// Parse the payload directly.
+		$payload = file_get_contents( 'php://input' );
+		$event   = ! empty( $payload ) ? json_decode( $payload, true ) : null;
 
-		if ( ! $event || ! isset( $event['type'] ) ) {
+		if ( ! is_array( $event ) || ! isset( $event['type'] ) ) {
 			Helper::srfm_log( 'Invalid webhook event.' );
 			return;
 		}
+
+		// Set mode for downstream usage.
+		$this->mode = ! empty( $mode ) && in_array( $mode, [ 'test', 'live' ], true ) ? $mode : 'test';
 
 		Helper::srfm_log( 'Processing event type: ' . $event['type'] . '.' );
 		Helper::srfm_log( $event, 'Processing ectual event : ' );
@@ -552,10 +602,12 @@ class Stripe_Webhook {
 
 		$current_logs[] = $new_log;
 
-		// Update subscription record with canceled status.
+		// Track lifecycle on `subscription_status` and leave the transaction `status`
+		// (e.g. 'succeeded') untouched so admins can still refund the initial payment
+		// after Stripe emits customer.subscription.deleted.
 		$update_data = [
-			'status' => 'canceled',
-			'log'    => $current_logs,
+			'subscription_status' => 'canceled',
+			'log'                 => $current_logs,
 		];
 
 		$result = Payments::update( $subscription_db_id, $update_data );
@@ -573,6 +625,22 @@ class Stripe_Webhook {
 				gmdate( 'Y-m-d H:i:s', $canceled_at )
 			)
 		);
+
+		// Notify consumers that the subscription has reached a terminal canceled state.
+		$canceled_record = Payments::get( $subscription_db_id );
+		if ( is_array( $canceled_record ) ) {
+			/**
+			 * Fires when a subscription reaches its terminal `canceled` state (for
+			 * Stripe, after the billing period ends — `customer.subscription.deleted`).
+			 *
+			 * @param array<string, mixed> $subscription_record The canceled subscription payment record.
+			 * @param array<string, mixed> $context             Resolved context: form_id, entry_id,
+			 *                                                   user_id (0 for guests), customer_email,
+			 *                                                   type, gateway, mode.
+			 * @since 2.12.0
+			 */
+			do_action( 'srfm_subscription_canceled', $canceled_record, Payment_Helper::build_payment_context( $canceled_record ) );
+		}
 	}
 
 	/**
@@ -715,6 +783,24 @@ class Stripe_Webhook {
 				$currency
 			)
 		);
+
+		// Notify consumers that a refund was recorded against this payment.
+		$is_full_refund   = $total_after_refund >= $original_amount;
+		$refunded_payment = Payments::get( $payment_id );
+		$refunded_payment = is_array( $refunded_payment ) ? $refunded_payment : $payment;
+		/**
+		 * Fires when a refund is recorded against a SureForms payment (covers both
+		 * the Stripe webhook and admin-initiated refund paths).
+		 *
+		 * @param array<string, mixed> $payment        Payment record (a `sureforms_payments` row).
+		 * @param float                $refund_amount  Refunded amount for this event, in the store's decimal currency.
+		 * @param bool                 $is_full_refund Whether the cumulative refunds now cover the full payment.
+		 * @param array<string, mixed> $context        Resolved context: form_id, entry_id,
+		 *                                              user_id (0 for guests), customer_email,
+		 *                                              type, gateway, mode.
+		 * @since 2.12.0
+		 */
+		do_action( 'srfm_payment_refunded', $refunded_payment, (float) $new_refund_amount, $is_full_refund, Payment_Helper::build_payment_context( $refunded_payment ) );
 
 		return true;
 	}
@@ -1017,6 +1103,22 @@ class Stripe_Webhook {
 			Helper::srfm_log( 'Failed to update subscription record for initial payment. Subscription ID: ' . $subscription_id . '.' );
 		} else {
 			Helper::srfm_log( 'Initial subscription payment processed successfully. Subscription ID: ' . $subscription_id . '.' );
+
+			// Notify consumers that the initial subscription charge succeeded.
+			$payment = Payments::get( $subscription_id );
+			if ( is_array( $payment ) ) {
+				/**
+				 * Fires when a SureForms payment reaches the `succeeded` state — a
+				 * one-time payment, or the initial charge of a subscription.
+				 *
+				 * @param array<string, mixed> $payment Payment record (a `sureforms_payments` row).
+				 * @param array<string, mixed> $context Resolved context: form_id, entry_id,
+				 *                                       user_id (0 for guests), customer_email,
+				 *                                       type, gateway, mode.
+				 * @since 2.12.0
+				 */
+				do_action( 'srfm_payment_completed', $payment, Payment_Helper::build_payment_context( $payment ) );
+			}
 		}
 	}
 
@@ -1123,6 +1225,23 @@ class Stripe_Webhook {
 				$get_secret_key = Stripe_Helper::get_stripe_secret_key( $this->mode );
 				Stripe_Helper::intersect_payment( $charge_id, $get_secret_key, '', 'SureForms' );
 			}
+
+			// Notify consumers that a subscription renewal charge succeeded.
+			$renewal_payment = Payments::get( $payment_entry_id );
+			if ( is_array( $renewal_payment ) ) {
+				/**
+				 * Fires when a subscription renewal charge succeeds and its payment
+				 * row has been recorded.
+				 *
+				 * @param array<string, mixed> $payment              Renewal payment record (a `sureforms_payments` row).
+				 * @param array<string, mixed> $parent_subscription  The parent subscription payment record.
+				 * @param array<string, mixed> $context              Resolved context: form_id, entry_id,
+				 *                                                    user_id (0 for guests), customer_email,
+				 *                                                    type, gateway, mode.
+				 * @since 2.12.0
+				 */
+				do_action( 'srfm_subscription_renewed', $renewal_payment, $subscription_record, Payment_Helper::build_payment_context( $renewal_payment ) );
+			}
 		} else {
 			Helper::srfm_log( 'Failed to create renewal payment record.' );
 		}
@@ -1152,5 +1271,57 @@ class Stripe_Webhook {
 
 		// O(1) lookup using refund ID as array key.
 		return isset( $payment_data['refunds'][ $refund_id ] );
+	}
+
+	/**
+	 * Verify Stripe webhook signature locally using HMAC-SHA256.
+	 * Implements the same algorithm as Stripe's SDK without external dependencies.
+	 *
+	 * @param string $payload    Raw request body.
+	 * @param string $sig_header Stripe-Signature header value.
+	 * @param string $secret     Webhook signing secret (whsec_...).
+	 * @param int    $tolerance  Maximum age in seconds for replay protection.
+	 * @since 2.6.0
+	 * @return bool True if signature is valid, false otherwise.
+	 */
+	private function verify_stripe_signature_locally( $payload, $sig_header, $secret, $tolerance = 300 ) {
+		// Parse the Stripe-Signature header (format: t=timestamp,v1=signature,...).
+		$parts     = explode( ',', $sig_header );
+		$timestamp = '';
+		$signature = '';
+
+		foreach ( $parts as $part ) {
+			$pair = explode( '=', $part, 2 );
+			if ( 2 !== count( $pair ) ) {
+				continue;
+			}
+			if ( 't' === $pair[0] ) {
+				$timestamp = $pair[1];
+			} elseif ( 'v1' === $pair[0] ) {
+				$signature = $pair[1];
+			}
+		}
+
+		if ( empty( $timestamp ) || empty( $signature ) ) {
+			Helper::srfm_log( 'Webhook signature verification failed: missing timestamp or v1 signature.' );
+			return false;
+		}
+
+		// Replay protection: reject requests older than tolerance.
+		if ( absint( $timestamp ) < time() - $tolerance ) {
+			Helper::srfm_log( 'Webhook signature verification failed: timestamp too old.' );
+			return false;
+		}
+
+		// Compute expected signature: HMAC-SHA256 of "timestamp.payload" with the secret.
+		$signed_payload     = $timestamp . '.' . $payload;
+		$expected_signature = hash_hmac( 'sha256', $signed_payload, $secret );
+
+		if ( ! hash_equals( $expected_signature, $signature ) ) {
+			Helper::srfm_log( 'Webhook signature verification failed: signature mismatch.' );
+			return false;
+		}
+
+		return true;
 	}
 }

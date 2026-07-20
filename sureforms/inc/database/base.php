@@ -421,8 +421,20 @@ abstract class Base {
 			$result = $wpdb->query( $query ); // phpcs:ignore -- It is okay. We are already using prepare above and we need to do DB query directly here.
 
 			if ( false === $result ) {
-				// Stop DB alteration if we have any error.
+				// Stop DB alteration if we have any error. A failed ALTER leaves the table
+				// version un-bumped, so it retries on every request — expose the underlying
+				// error so persistent failures are diagnosable (hook for logging/monitoring).
 				$this->db_upgradable = false;
+
+				/**
+				 * Fires when a SureForms DB schema-upgrade query fails.
+				 *
+				 * @since 2.11.0
+				 * @param string $last_error The DB error message ( $wpdb->last_error ).
+				 * @param string $query      The ALTER query that failed.
+				 * @param string $table      The table being altered.
+				 */
+				do_action( 'srfm_db_upgrade_query_failed', $this->wpdb->last_error, $query, $this->get_tablename() );
 			}
 
 			return $result;
@@ -511,6 +523,10 @@ abstract class Base {
 		}
 
 		$result = $this->wpdb->insert( $this->get_tablename(), $prepared_data['data'], $format );
+
+		// Reset cache so subsequent queries in the same request include the new row.
+		$this->cache_reset();
+
 		return $result ? $this->wpdb->insert_id : false;
 	}
 
@@ -645,7 +661,7 @@ abstract class Base {
 	 * @return array<mixed> The results of the query, typically an array of objects or associative arrays.
 	 */
 	public function get_records_by_args( $args = [], $set_limit = true ) {
-		$_args         = wp_parse_args(
+		$_args           = wp_parse_args(
 			$args,
 			[
 				'where'   => [],
@@ -656,8 +672,11 @@ abstract class Base {
 				'order'   => 'DESC',
 			]
 		);
-		$extra_queries = [
-			sprintf( 'ORDER BY `%1$s` %2$s', Helper::get_string_value( esc_sql( $_args['orderby'] ) ), Helper::get_string_value( esc_sql( $_args['order'] ) ) ),
+		$allowed_orderby = $this->get_allowed_orderby_columns();
+		$orderby         = in_array( $_args['orderby'], $allowed_orderby, true ) ? $_args['orderby'] : 'created_at';
+		$order           = 'ASC' === strtoupper( Helper::get_string_value( $_args['order'] ) ) ? 'ASC' : 'DESC';
+		$extra_queries   = [
+			sprintf( 'ORDER BY `%1$s` %2$s', $orderby, $order ),
 		];
 
 		if ( $set_limit ) {
@@ -702,6 +721,17 @@ abstract class Base {
 
 		// Execute the query and return the integer count.
 		return Helper::get_integer_value( $this->cache_set( $query, $results ) );
+	}
+
+	/**
+	 * Get the allowed column names for ORDER BY clauses.
+	 * Child classes may override this method to restrict orderable columns further.
+	 *
+	 * @since 2.6.0
+	 * @return array<string>
+	 */
+	protected function get_allowed_orderby_columns() {
+		return array_merge( array_keys( $this->get_schema() ), [ 'updated_at' ] );
 	}
 
 	/**
@@ -777,15 +807,17 @@ abstract class Base {
 
 		// If there are WHERE clauses, prepare and append them to the query.
 		if ( is_array( $where_clauses ) ) {
-			$where  = '';
+			$groups = [];
 			$values = [];
 			$schema = $this->get_schema();
 
 			foreach ( $where_clauses as $key => $value ) {
 
 				$relation = ! empty( $value['RELATION'] ) ? trim( $value['RELATION'] ) : 'AND';
+				$relation = in_array( strtoupper( $relation ), [ 'AND', 'OR' ], true ) ? strtoupper( $relation ) : 'AND';
 
 				if ( is_int( $key ) ) {
+					$clause_parts = [];
 					foreach ( $value as $_key => $_value ) {
 						if ( is_int( $_key ) ) {
 							// Check if the operator is allowed.
@@ -793,25 +825,34 @@ abstract class Base {
 								continue;
 							}
 
+							// Skip if key is not in schema.
+							if ( ! isset( $schema[ $_value['key'] ] ) ) {
+								continue;
+							}
+
 							switch ( $_value['compare'] ) {
 								case 'LIKE':
-									$where   .= ' ' . $_value['key'] . ' ' . $_value['compare'] . ' "%%' . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) ) . '%%" ' . $relation;
-									$values[] = $_value['value'];
+									$clause_parts[] = $_value['key'] . ' ' . $_value['compare'] . ' "%%' . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) ) . '%%"';
+									$values[]       = $_value['value'];
 									break;
 
 								case 'IN':
 									// Based on the number of values and datatype, it will create WHERE clause for $wpdb::prepare method. Eg: for ID with three values column: ID IN (%d, %d, %d).
-									$datatype = $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) );
-									$where   .= ' ' . $_value['key'] . ' ' . $_value['compare'] . ' (' . implode( ', ', array_fill( 0, count( $_value['value'] ), $datatype ) ) . ') ' . $relation;
-									$values   = array_merge( $values, $_value['value'] );
+									$datatype       = $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) );
+									$clause_parts[] = $_value['key'] . ' ' . $_value['compare'] . ' (' . implode( ', ', array_fill( 0, count( $_value['value'] ), $datatype ) ) . ')';
+									$values         = array_merge( $values, $_value['value'] );
 									break;
 
 								default:
-									$where   .= ' ' . $_value['key'] . ' ' . $_value['compare'] . ' ' . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) ) . ' ' . $relation;
-									$values[] = $_value['value'];
+									$clause_parts[] = $_value['key'] . ' ' . $_value['compare'] . ' ' . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) );
+									$values[]       = $_value['value'];
 									break;
 							}
 						}
+					}
+
+					if ( ! empty( $clause_parts ) ) {
+						$groups[] = '(' . implode( ' ' . $relation . ' ', $clause_parts ) . ')';
 					}
 					continue;
 				}
@@ -821,15 +862,15 @@ abstract class Base {
 					continue;
 				}
 
-				$where   .= ' ' . $key . ' = ' . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $key ]['type'] ) ) . ' ' . $relation;
+				$groups[] = '(' . $key . ' = ' . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $key ]['type'] ) ) . ')';
 				$values[] = $value;
 			}
 
-			if ( ! $where ) {
+			if ( empty( $groups ) ) {
 				return '';
 			}
 
-			$where = ' WHERE ' . trim( trim( $where, $relation ) );
+			$where = ' WHERE ' . implode( ' AND ', $groups );
 
 			// Prepare the query with placeholders.
 			// @phpstan-ignore-next-line -- We are already assigning non-literal string above using "get_format_by_datatype" methods.

@@ -14,9 +14,27 @@ class PaymentManager {
 	constructor( paymentBlock, form ) {
 		this.paymentBlock = paymentBlock;
 		this.blockId = paymentBlock.getAttribute( 'data-block-id' );
+		this.compositeKey = window.srfmGetPaymentKey
+			? window.srfmGetPaymentKey( form, this.blockId )
+			: this.blockId;
 		this.paymentInput = paymentBlock.querySelector( '.srfm-payment-input' );
 		this.form = form;
+		// AbortController scopes the document-level srfm_payment_type_changed
+		// listener so it is removable on form re-initialization. Pattern mirrors
+		// PAYMENT_UTILITY.listenAmountChanges() in stripe-payment.js.
+		this.abortController = new AbortController();
 		this.init();
+	}
+
+	/**
+	 * Tear down listeners owned by this instance. Called by
+	 * initializePaymentManagers before replacing this manager so document-level
+	 * listeners don't accumulate across form re-initializations.
+	 */
+	destroy() {
+		if ( this.abortController ) {
+			this.abortController.abort();
+		}
 	}
 
 	init() {
@@ -62,6 +80,30 @@ class PaymentManager {
 				this.handleAccordionHeaderClick( header );
 			} );
 		} );
+
+		// BOTH MODE: forward the payment-type change so gateways can reinit if needed.
+		// stripe-payment.js dispatches `srfm_payment_type_changed` on the document.
+		// We keep a per-instance listener so multiple payment blocks on a page don't
+		// step on each other. Scoped to abortController so it can be torn down on
+		// form re-initialization (see destroy()).
+		document.addEventListener(
+			'srfm_payment_type_changed',
+			( event ) => {
+				if ( event?.detail?.blockId !== this.blockId ) {
+					return;
+				}
+				if ( event?.detail?.form !== this.form ) {
+					return;
+				}
+				// Re-broadcast a payment-method event so accordion gateways re-render
+				// for the new mode (Stripe is already handled by reinitForBlock).
+				this.dispatchPaymentMethodEvent(
+					this.getSelectedMethod(),
+					this.form
+				);
+			},
+			{ signal: this.abortController.signal }
+		);
 	}
 
 	/**
@@ -211,11 +253,11 @@ class PaymentManager {
 			};
 		}
 
-		const paymentData = window.srfmPaymentElements?.[ this.blockId ];
+		const paymentData = window.srfmPaymentElements?.[ this.compositeKey ];
 
 		if ( paymentData && paymentData.clientSecret ) {
 			const paymentResult = await window.StripePayment.srfmConfirmPayment(
-				this.blockId,
+				this.compositeKey,
 				paymentData,
 				form
 			).catch( () => {
@@ -253,8 +295,12 @@ class PaymentManager {
 		// PayPal uses a different flow - it's handled by PayPal buttons
 		// which call the backend directly and store completion status
 
-		// Check if PayPal payment completion data exists for this block
-		const paypalPaymentData = window.srfmPayPalPayments?.[ this.blockId ];
+		// Check if PayPal payment completion data exists for this block.
+		// No blockId fallback needed here — sureforms-pro (which writes to srfmPayPalPayments)
+		// is always updated alongside sureforms (core) since we enforce minimum core version
+		// via SRFM_PRO_CORE_RQD_VER, so both plugins will use compositeKey simultaneously.
+		const paypalPaymentData =
+			window.srfmPayPalPayments?.[ this.compositeKey ];
 
 		// Verify that PayPal payment was completed
 		if ( paypalPaymentData && paypalPaymentData.completed === true ) {
@@ -263,7 +309,7 @@ class PaymentManager {
 				window.srfmPaymentElements = {};
 			}
 
-			window.srfmPaymentElements[ this.blockId ] = {
+			window.srfmPaymentElements[ this.compositeKey ] = {
 				paymentMethod: 'paypal',
 				paypalOrderId: paypalPaymentData.orderID,
 				paypalSubscriptionId: paypalPaymentData.subscriptionID,
@@ -278,7 +324,7 @@ class PaymentManager {
 					'payment_successful',
 					'Payment successful'
 				),
-				paymentResult: window.srfmPaymentElements[ this.blockId ],
+				paymentResult: window.srfmPaymentElements[ this.compositeKey ],
 			};
 		}
 
@@ -300,13 +346,20 @@ function initializePaymentManagers() {
 
 		paymentBlocks.forEach( ( paymentBlock ) => {
 			const blockId = paymentBlock.getAttribute( 'data-block-id' );
+			const compositeKey = window.srfmGetPaymentKey
+				? window.srfmGetPaymentKey( form, blockId )
+				: blockId;
 
 			// Store payment manager instance
 			if ( ! window.srfmPaymentManagers ) {
 				window.srfmPaymentManagers = {};
 			}
 
-			window.srfmPaymentManagers[ blockId ] = new PaymentManager(
+			// Tear down the previous manager (if any) so its document-level
+			// srfm_payment_type_changed listener is removed before we replace it.
+			window.srfmPaymentManagers[ compositeKey ]?.destroy?.();
+
+			window.srfmPaymentManagers[ compositeKey ] = new PaymentManager(
 				paymentBlock,
 				form
 			);

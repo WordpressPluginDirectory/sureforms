@@ -8,6 +8,7 @@
 
 namespace SRFM\Inc;
 
+use SRFM\Inc\Compatibility\Multilingual\Multilingual_Manager;
 use SRFM\Inc\Database\Tables\Entries;
 use SRFM\Inc\Email\Email_Template;
 use SRFM\Inc\Lib\Browser\Browser;
@@ -76,81 +77,28 @@ class Form_Submit {
 				'permission_callback' => [ $this, 'submit_form_permissions_check' ],
 			]
 		);
-
-		register_rest_route(
-			$this->namespace,
-			'/refresh-nonces',
-			[
-				'methods'             => 'GET',
-				'callback'            => [ $this, 'refresh_nonces' ],
-				'permission_callback' => '__return_true',
-			]
-		);
 	}
 
 	/**
-	 * Refresh frontend nonces for form submission
+	 * Check whether a given request has permission to submit the form.
 	 *
-	 * @return \WP_REST_Response Response with fresh nonces.
-	 * @since 2.5.1
-	 */
-	public function refresh_nonces() {
-		nocache_headers();
-
-		// Check if nonce refresh is allowed.
-		if ( ! Helper::should_update_form_markup_nonce() ) {
-			return rest_ensure_response(
-				[
-					'success' => false,
-					'message' => __( 'Nonce refresh is disabled.', 'sureforms' ),
-				]
-			);
-		}
-
-		// Get fresh nonces from Helper.
-		$nonces = Helper::get_frontend_nonces();
-
-		return rest_ensure_response(
-			[
-				'success' => true,
-				'nonces'  => $nonces,
-			]
-		);
-	}
-
-	/**
-	 * Check whether a given request has permission access route.
+	 * Validates the HMAC-based submission token embedded in the page at render
+	 * time. Tokens remain valid for up to 48 hours (four 12-hour windows), so
+	 * they survive cached-page scenarios without any browser-side refresh call.
 	 *
-	 * @param \WP_REST_Request $request Request object or array containing form data.
-	 * @since 1.8.0
+	 * @param \WP_REST_Request $request Incoming REST request.
+	 * @since 2.6.0
 	 * @return WP_Error|bool
 	 */
 	public function submit_form_permissions_check( $request ) {
-		$nonce = Helper::get_string_value( $request->get_header( 'X-WP-Submit-Nonce' ) );
-		if ( ! wp_verify_nonce( sanitize_text_field( $nonce ), 'srfm_form_submit' ) ) {
-			wp_send_json_error(
-				[
-					'message' => __( 'Security verification failed. Please refresh the page and try again.', 'sureforms' ),
-				]
-			);
-		}
+		$token   = Helper::get_string_value( $request->get_header( 'X-WP-Submit-Token' ) );
+		$form_id = absint( $request->get_param( 'form-id' ) );
 
-		$form_data = Helper::sanitize_by_field_type( $request->get_params() );
-
-		if ( empty( $form_data ) || ! is_array( $form_data ) ) {
-			wp_send_json_error(
-				[
-					'message' => __( 'Form data was not found.', 'sureforms' ),
-				]
-			);
-		}
-
-		if ( ! $form_data['form-id'] ) {
-			wp_send_json_error(
-				[
-					'message'  => __( 'Form ID is missing.', 'sureforms' ),
-					'position' => 'header',
-				]
+		if ( ! Submit_Token::verify( $token, $form_id ) ) {
+			return new WP_Error(
+				'srfm_token_invalid',
+				__( 'Security verification failed. Please refresh the page and try again.', 'sureforms' ),
+				[ 'status' => 403 ]
 			);
 		}
 
@@ -279,15 +227,20 @@ class Form_Submit {
 	 * @return \WP_REST_Response|\WP_Error Response object on success, or WP_Error object on failure.
 	 */
 	public function handle_form_submission( $request ) {
-		/**
-		 * All checks are done in submit_form_permissions_check method:
-		 * - Nonce verification
-		 * - Form data validation
-		 * - Form ID validation
-		 *
-		 * @since 1.8.0
-		 */
 		$form_data = Helper::sanitize_by_field_type( $request->get_params() );
+
+		if ( empty( $form_data ) || ! is_array( $form_data ) ) {
+			wp_send_json_error( [ 'message' => __( 'Form data is not found.', 'sureforms' ) ] );
+		}
+
+		if ( empty( $form_data['form-id'] ) ) {
+			wp_send_json_error(
+				[
+					'message'  => __( 'Form ID is missing.', 'sureforms' ),
+					'position' => 'header',
+				]
+			);
+		}
 
 		$current_form_id = $form_data['form-id'];
 
@@ -426,7 +379,7 @@ class Form_Submit {
 
 		if ( isset( $form_data['srfm-honeypot-field'] ) && empty( $form_data['srfm-honeypot-field'] ) ) {
 			if ( ! empty( $google_captcha_secret_key ) ) {
-				if ( isset( $form_data['sureforms_form_submit'] ) ) {
+				if ( ! empty( $form_data['form-id'] ) ) {
 					$secret_key       = $google_captcha_secret_key;
 					$ipaddress        = isset( $_SERVER['REMOTE_ADDR'] ) ? filter_var( wp_unslash( $_SERVER['REMOTE_ADDR'] ), FILTER_VALIDATE_IP ) : '';
 					$captcha_response = $form_data['g-recaptcha-response'];
@@ -471,7 +424,7 @@ class Form_Submit {
 			}
 
 			if ( ! empty( $google_captcha_secret_key ) ) {
-				if ( isset( $form_data['sureforms_form_submit'] ) ) {
+				if ( ! empty( $form_data['form-id'] ) ) {
 					$secret_key       = $google_captcha_secret_key;
 					$ipaddress        = isset( $_SERVER['REMOTE_ADDR'] ) ? filter_var( wp_unslash( $_SERVER['REMOTE_ADDR'] ), FILTER_VALIDATE_IP ) : '';
 					$captcha_response = $form_data['g-recaptcha-response'];
@@ -573,17 +526,17 @@ class Form_Submit {
 		 */
 		do_action( 'srfm_before_submission', $form_before_submission_data );
 
-		$name       = sanitize_text_field( get_the_title( intval( $id ) ) );
-		$send_email = $this->send_email( $id, $submission_data, $form_data );
-		$emails     = [];
-
-		if ( $send_email ) {
-			$emails = $send_email['emails'];
-		}
+		$name   = sanitize_text_field( get_the_title( intval( $id ) ) );
+		$emails = [];
 
 		// Check if GDPR is enabled and do not store entries is enabled.
 		// If so, send email and do not store entries.
 		if ( $gdpr && $do_not_store_entries ) {
+			// Send email before early return. No entry is created in this path so {entry_id} will be empty — that is expected.
+			$send_email = $this->send_email( $id, $submission_data, $form_data );
+			if ( $send_email ) {
+				$emails = $send_email['emails'];
+			}
 
 			$form_submit_response = [
 				'success'   => true,
@@ -618,11 +571,12 @@ class Form_Submit {
 
 		$global_setting_options = get_option( 'srfm_general_settings_options' );
 
-		// If GDPR is enabled, do not store IP, browser, and device info.
-		// If not, store IP, browser, and device info.
-		$user_ip      = '';
-		$browser_name = '';
-		$device_name  = '';
+		// If GDPR is enabled, do not store IP, browser, device, and submission URL.
+		// If not, store all of them.
+		$user_ip        = '';
+		$browser_name   = '';
+		$device_name    = '';
+		$submission_url = '';
 		if ( ! $gdpr ) {
 			$srfm_ip_log = is_array( $global_setting_options ) && isset( $global_setting_options['srfm_ip_log'] ) ? $global_setting_options['srfm_ip_log'] : '';
 
@@ -630,20 +584,43 @@ class Form_Submit {
 			$browser      = new Browser();
 			$browser_name = sanitize_text_field( $browser->getBrowser() );
 			$device_name  = sanitize_text_field( $browser->getPlatform() );
+
+			// Capture submission page URL server-side from the Referer header.
+			// esc_url_raw() (not sanitize_text_field) preserves percent-encoded
+			// non-ASCII slugs; normalize_submission_url() then validates same-origin.
+			$referer        = isset( $_SERVER['HTTP_REFERER'] ) ? esc_url_raw( wp_unslash( $_SERVER['HTTP_REFERER'] ) ) : '';
+			$submission_url = $this->normalize_submission_url( $referer );
 		}
 
 		$form_markup = get_the_content( null, false, Helper::get_integer_value( $form_data['form-id'] ) );
 		$pattern     = '/"label":"(.*?)"/';
 		preg_match_all( $pattern, $form_markup, $matches );
 		$submission_info = [
-			'user_ip'      => $user_ip,
-			'browser_name' => $browser_name,
-			'device_name'  => $device_name,
+			'user_ip'        => $user_ip,
+			'browser_name'   => $browser_name,
+			'device_name'    => $device_name,
+			'submission_url' => $submission_url,
 		];
-		$entries_data    = [
+		// Prefer the language the visitor saw at form-render time (captured in a
+		// hidden srfm-form-language input), since WPML's language detection on the
+		// REST submit endpoint frequently falls back to the default. The hidden
+		// input is client-supplied, so:
+		// 1. Validate shape with a BCP-47 regex.
+		// 2. Cross-check against the active multilingual provider's known
+		// languages (active + default) so a crafted request can't pollute
+		// the column with codes the site doesn't support.
+		// 3. Fall back to the provider's current_language() on either failure.
+		$entry_language     = Multilingual_Manager::get_instance()->provider()->current_language();
+		$submitted_language = isset( $form_data['srfm-form-language'] ) ? sanitize_text_field( Helper::get_string_value( $form_data['srfm-form-language'] ) ) : '';
+		if ( '' !== $submitted_language && preg_match( '/^[a-z]{2,3}([_-][A-Za-z0-9]{2,8})?$/', $submitted_language ) === 1 && $this->is_known_language( $submitted_language ) ) {
+			$entry_language = $submitted_language;
+		}
+
+		$entries_data = [
 			'form_id'         => $id,
 			'form_data'       => $submission_data,
 			'submission_info' => $submission_info,
+			'language'        => $entry_language,
 			'created_at'      => current_time( 'mysql' ),
 		];
 		if ( is_user_logged_in() ) {
@@ -662,8 +639,32 @@ class Form_Submit {
 
 		$entry_id = Entries::add( $entries_data );
 		if ( $entry_id ) {
+			// Inject entry_id so {entry_id} smart tag resolves in confirmation message, redirect URL, email notifications, and downstream integrations.
+			$form_data['entry_id'] = intval( $entry_id );
+
+			// Switch the multilingual provider to the entry's language so the
+			// confirmation message, redirect URL, and email notifications render
+			// in the language the visitor saw at submit time. The REST submit
+			// endpoint doesn't carry the ?lang= URL parameter, so without this
+			// switch the provider would return strings in its default language
+			// even though the entry itself is correctly tagged.
+			$provider = Multilingual_Manager::get_instance()->provider();
+			if ( $provider->is_active() && '' !== $entry_language ) {
+				$provider->switch_language( $entry_language );
+			}
+
+			// Send email after entry creation so {entry_id} is available when smart tags are processed.
+			$send_email = $this->send_email( $id, $submission_data, $form_data );
+			if ( $send_email ) {
+				$emails = $send_email['emails'];
+			}
 
 			$confirmation_message = Generate_Form_Markup::get_confirmation_markup( $form_data, $submission_data );
+			$redirect_url         = Generate_Form_Markup::get_redirect_url( $form_data, $submission_data );
+
+			if ( $provider->is_active() && '' !== $entry_language ) {
+				$provider->restore_language();
+			}
 
 			$response = [
 				'success'      => true,
@@ -674,7 +675,7 @@ class Form_Submit {
 					'after_submit'       => true,
 					'after_submit_nonce' => wp_create_nonce( 'srfm_after_submission_' . Helper::get_string_value( $entry_id ) ),
 				],
-				'redirect_url' => Generate_Form_Markup::get_redirect_url( $form_data, $submission_data ),
+				'redirect_url' => $redirect_url,
 			];
 
 			$form_submit_response = apply_filters(
@@ -997,62 +998,65 @@ class Form_Submit {
 	}
 
 	/**
-	 * Retrieve all entries data for a specific form ID to check for unique values.
+	 * Validate unique field values for a specific form via AJAX.
+	 *
+	 * Checks submitted field values against existing entries to determine
+	 * if duplicates exist. Rate-limited to prevent data enumeration.
 	 *
 	 * @since 0.0.1
+	 * @since 2.7.0 Added rate limiting, form validation, and optimized query.
 	 * @return void
 	 */
 	public function field_unique_validation() {
-		if ( empty( $_POST['nonce'] ) || ! wp_verify_nonce( sanitize_key( wp_unslash( $_POST['nonce'] ) ), 'unique_validation_nonce' ) ) {
-			$error_message = __( 'Security verification failed. Please refresh the page and try again.', 'sureforms' );
-			$error_data    = [
-				'error' => $error_message,
-			];
-			wp_send_json_error( $error_data );
+		$token   = isset( $_POST['token'] ) ? sanitize_text_field( wp_unslash( $_POST['token'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- HMAC token verification replaces nonce.
+		$form_id = isset( $_POST['id'] ) ? absint( wp_unslash( $_POST['id'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+		if ( ! Submit_Token::verify( $token, $form_id ) ) {
+			wp_send_json_error( [ 'error' => __( 'Security verification failed. Please refresh the page and try again.', 'sureforms' ) ] );
 		}
 
-		global $wpdb;
-		$id         = isset( $_POST['id'] ) ? absint( wp_unslash( $_POST['id'] ) ) : 0;
-		$meta_value = $id;
-
-		if ( ! $meta_value ) {
-			$error_message = __( 'Invalid form ID.', 'sureforms' );
-			$error_data    = [
-				'error' => $error_message,
-			];
-			wp_send_json_error( $error_data );
+		if ( ! $form_id ) {
+			wp_send_json_error( [ 'error' => __( 'Invalid form ID.', 'sureforms' ) ] );
 		}
 
-		$_POST = array_map( 'wp_unslash', $_POST );
+		// Validate the form exists and is published to prevent cross-form probing.
+		if ( 'publish' !== get_post_status( $form_id ) || 'sureforms_form' !== get_post_type( $form_id ) ) {
+			wp_send_json_error( [ 'error' => __( 'Invalid form.', 'sureforms' ) ] );
+		}
 
-		// Get the entry IDs for the particualr form to perform unique field validation.
-		$entry_ids = Entries::get_all_entry_ids_for_form( $id );
+		// Rate limit: 10 requests per minute per IP per form.
+		if ( $this->is_unique_validation_rate_limited( $form_id ) ) {
+			wp_send_json_error( [ 'error' => __( 'Too many requests. Please try again shortly.', 'sureforms' ) ], 429 );
+		}
 
-		$all_form_entries = [];
-		$keys             = array_keys( $_POST );
-		$length           = count( $keys );
+		// Extract and validate field values from POST data.
+		$skip_keys  = [ 'action', 'token', 'id' ];
+		$duplicates = [];
 
-		for ( $i = 3; $i < $length; $i++ ) {
-			$key   = $keys[ $i ];
-			$value = isset( $_POST[ $key ] ) ? sanitize_text_field( wp_unslash( $_POST[ $key ] ) ) : '';
-			$key   = str_replace( '_', ' ', $keys[ $i ] );
+		foreach ( $_POST as $raw_key => $raw_value ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- HMAC token verified above.
+			if ( in_array( $raw_key, $skip_keys, true ) ) {
+				continue;
+			}
 
-			foreach ( $entry_ids as $entry_id ) {
-				$entry_id  = is_array( $entry_id ) ? Helper::get_integer_value( $entry_id['ID'] ) : 0;
-				$form_data = Entries::get_form_data( $entry_id );
-				if ( is_array( $form_data ) && isset( $form_data[ $key ] ) && $form_data[ $key ] === $value ) {
-					$obj = [ $key => 'not unique' ];
-					array_push( $all_form_entries, $obj );
-					break;
-				}
+			$field_key = str_replace( '_', ' ', sanitize_text_field( $raw_key ) );
+			$value     = sanitize_text_field( wp_unslash( $raw_value ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- HMAC token verified above.
+
+			// Only process SureForms field keys (they contain -lbl- in the name).
+			if ( false === strpos( $field_key, '-lbl-' ) ) {
+				continue;
+			}
+
+			if ( '' === $value ) {
+				continue;
+			}
+
+			// Single optimized query per field instead of loading all entries.
+			if ( Entries::has_duplicate_field_value( $form_id, $field_key, $value ) ) {
+				$duplicates[] = [ $field_key => 'not unique' ];
 			}
 		}
 
-		$results = [
-			'data' => $all_form_entries,
-		];
-
-		wp_send_json( $results );
+		wp_send_json( [ 'data' => $duplicates ] );
 	}
 
 	/**
@@ -1226,6 +1230,135 @@ class Form_Submit {
 	}
 
 	/**
+	 * Sanitise and validate a Referer into a storable submission URL.
+	 *
+	 * The value is rebuilt from parsed components so a non-browser client cannot
+	 * inject bits a real browser would never send (userinfo, fragment) or mismatch
+	 * the legitimate origin's port. Anything that is not a same-origin http(s) URL,
+	 * or is longer than 2048 chars, is rejected and returns an empty string.
+	 *
+	 * Uses esc_url_raw() rather than sanitize_text_field(): the latter strips
+	 * percent-encoded octets (`%E0%A4...`), which mangles the URLs of translated
+	 * pages whose slugs contain non-ASCII characters (e.g. WPML Hindi/Arabic
+	 * permalinks) down to bare hyphens. esc_url_raw() preserves the percent-encoding
+	 * so the recorded submission URL stays accurate.
+	 *
+	 * @param string $referer Raw (unslashed) Referer header value.
+	 * @since 2.11.0
+	 * @return string Same-origin http(s) URL, or empty string when invalid.
+	 */
+	protected function normalize_submission_url( string $referer ): string {
+		$referer = esc_url_raw( $referer );
+
+		if ( '' === $referer || strlen( $referer ) > 2048 ) {
+			return '';
+		}
+
+		$parts      = wp_parse_url( $referer );
+		$home_parts = wp_parse_url( home_url() );
+
+		if (
+			! is_array( $parts )
+			|| ! is_array( $home_parts )
+			|| ! isset( $parts['scheme'], $parts['host'], $home_parts['host'] )
+			|| ! in_array( strtolower( $parts['scheme'] ), [ 'http', 'https' ], true )
+			|| 0 !== strcasecmp( (string) $parts['host'], (string) $home_parts['host'] )
+			|| ( $parts['port'] ?? null ) !== ( $home_parts['port'] ?? null )
+		) {
+			return '';
+		}
+
+		$clean = $parts['scheme'] . '://' . $parts['host']
+			. ( isset( $parts['port'] ) ? ':' . $parts['port'] : '' )
+			. ( $parts['path'] ?? '' )
+			. ( isset( $parts['query'] ) ? '?' . $parts['query'] : '' );
+
+		return esc_url_raw( $clean, [ 'http', 'https' ] );
+	}
+
+	/**
+	 * Check whether the given language code is known to the active multilingual
+	 * provider (i.e. in its active-languages set or matches the default language).
+	 *
+	 * Used to reject crafted srfm-form-language hidden-input values that pass
+	 * the BCP-47 shape regex but reference languages the site doesn't actually
+	 * support.
+	 *
+	 * @param string $language Language code to check (e.g. 'hi', 'de-AT').
+	 * @since 2.11.0
+	 * @return bool True when the code is known, false otherwise.
+	 */
+	protected function is_known_language( string $language ): bool {
+		if ( '' === $language ) {
+			return false;
+		}
+
+		$provider = Multilingual_Manager::get_instance()->provider();
+
+		// When no provider is active there's no authoritative set to check
+		// against. Accept whatever the visitor sent (shape-validated) so the
+		// column still reflects the visitor's intent on non-WPML sites.
+		if ( ! $provider->is_active() ) {
+			return true;
+		}
+
+		// Default language is always considered known.
+		if ( $language === $provider->default_language() ) {
+			return true;
+		}
+
+		// Use WPML's filter when available — works regardless of which
+		// multilingual plugin is the active provider, as Polylang implements
+		// the same filter for compatibility.
+		$active = apply_filters( 'wpml_active_languages', null, 'skip_missing=0' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WPML's own filter; the name must match WPML/Polylang exactly to integrate.
+		if ( is_array( $active ) && ! empty( $active ) ) {
+			return array_key_exists( $language, $active );
+		}
+
+		// A provider IS active but its language list is unavailable. Rather than
+		// fail open and trust an arbitrary client-supplied code, accept it only when
+		// it matches the server-resolved current language. The caller already
+		// defaults $entry_language to current_language(), so this keeps mis-tagging
+		// to the server's own determination instead of the (cacheable) client value.
+		return $language === $provider->current_language();
+	}
+
+	/**
+	 * Check if the current request is rate-limited for unique validation.
+	 *
+	 * Uses transients keyed by IP + form ID to throttle requests.
+	 * Allows 10 requests per 60-second window per IP per form.
+	 *
+	 * @param int $form_id The form ID being validated.
+	 * @since 2.7.0
+	 * @return bool True if rate-limited (should block), false if allowed.
+	 */
+	private function is_unique_validation_rate_limited( $form_id ) {
+		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
+
+		if ( empty( $ip ) || ! filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+			return true; // Fail closed if IP cannot be determined.
+		}
+
+		$transient_key = 'srfm_uv_' . md5( $ip . '_' . $form_id );
+		$attempts      = get_transient( $transient_key );
+
+		if ( false === $attempts ) {
+			set_transient( $transient_key, 1, MINUTE_IN_SECONDS );
+			return false;
+		}
+
+		$attempts_count = Helper::get_integer_value( $attempts );
+
+		if ( $attempts_count >= 10 ) {
+			return true;
+		}
+
+		set_transient( $transient_key, $attempts_count + 1, MINUTE_IN_SECONDS );
+		return false;
+	}
+
+	/**
 	 * Process and sanitize SureForms field data from submitted form data.
 	 *
 	 * @param array<mixed> $form_data Raw form data from submission.
@@ -1234,6 +1367,8 @@ class Form_Submit {
 	 * @return array Processed and sanitized submission data.
 	 */
 	private function process_form_fields( $form_data ) {
+		$form_id = isset( $form_data['form-id'] ) && is_numeric( $form_data['form-id'] ) ? absint( $form_data['form-id'] ) : 0;
+
 		$submission_data = [];
 
 		$form_data_keys  = array_keys( $form_data );
@@ -1317,7 +1452,29 @@ class Form_Submit {
 			}
 		}
 
-		return apply_filters( 'srfm_before_prepare_submission_data', $submission_data );
+		/**
+		 * Filters the submission data before preparing it for storage.
+		 *
+		 * The second parameter is a context array containing additional metadata
+		 * about the submission. This array is extensible — new keys may be added
+		 * in future versions without changing the filter signature.
+		 *
+		 * @since 2.6.0
+		 *
+		 * @param array<string,mixed> $submission_data Processed form submission data.
+		 * @param array<string,mixed> $context {
+		 *     Additional context for the submission.
+		 *
+		 *     @type int $form_id The ID of the form being submitted.
+		 * }
+		 */
+		return apply_filters(
+			'srfm_before_prepare_submission_data',
+			$submission_data,
+			[
+				'form_id' => $form_id,
+			]
+		);
 	}
 
 	/**

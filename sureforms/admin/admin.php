@@ -9,20 +9,21 @@ namespace SRFM\Admin;
 
 use Astra_Notices;
 use SRFM\Inc\AI_Form_Builder\AI_Helper;
-use SRFM\Inc\Analytics_Events;
 use SRFM\Inc\Database\Tables\Entries;
+use SRFM\Inc\Global_Settings\Global_Settings;
 use SRFM\Inc\Helper;
 use SRFM\Inc\Onboarding;
 use SRFM\Inc\Payments\Payment_Helper;
 use SRFM\Inc\Payments\Stripe\Stripe_Helper;
+use SRFM\Inc\Smart_Tags;
 use SRFM\Inc\Traits\Get_Instance;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit; // Exit if accessed directly.
 }
 
-if ( ! class_exists( 'Astra_Notices' ) ) {
-	require_once SRFM_DIR . 'inc/lib/astra-notices/class-astra-notices.php';
+if ( ! class_exists( 'BSF_Admin_Notices' ) ) {
+	require_once SRFM_DIR . 'inc/lib/astra-notices/class-bsf-admin-notices.php';
 }
 /**
  * Admin handler class.
@@ -38,6 +39,17 @@ class Admin {
 	 * @since 2.5.2
 	 */
 	public const RATING_NOTICE_THRESHOLD = 3;
+
+	/**
+	 * Inline CSS for Quill 1.x (react-quill) list markers.
+	 *
+	 * Quill 1.x renders bullet/numbered list markers via CSS ::before pseudo-elements,
+	 * whereas the vendor quill.snow.css targets .ql-ui child elements (Quill 2.x approach).
+	 * This constant is shared by enqueue_styles() and enqueue_scripts() to prevent drift.
+	 *
+	 * @since 2.5.2
+	 */
+	public const QUILL_1X_INLINE_CSS = '.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ol li:not(.ql-direction-rtl),.ql-editor ul li:not(.ql-direction-rtl){padding-left:1.5em}.ql-editor ol li.ql-direction-rtl,.ql-editor ul li.ql-direction-rtl{padding-right:1.5em}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}.ql-editor ol li{counter-reset:list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;counter-increment:list-0}.ql-editor ol li::before{content:counter(list-0,decimal) ". "}.ql-editor ol li.ql-indent-1{counter-increment:list-1;counter-reset:list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-1::before{content:counter(list-1,lower-alpha) ". "}.ql-editor ol li.ql-indent-2{counter-increment:list-2;counter-reset:list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-2::before{content:counter(list-2,lower-roman) ". "}.ql-editor ol li.ql-indent-3{counter-increment:list-3;counter-reset:list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-3::before{content:counter(list-3,decimal) ". "}.ql-editor ol li.ql-indent-4{counter-increment:list-4;counter-reset:list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-4::before{content:counter(list-4,lower-alpha) ". "}.ql-editor ol li.ql-indent-5{counter-increment:list-5;counter-reset:list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-5::before{content:counter(list-5,lower-roman) ". "}.ql-editor ol li.ql-indent-6{counter-increment:list-6;counter-reset:list-7 list-8 list-9}.ql-editor ol li.ql-indent-6::before{content:counter(list-6,decimal) ". "}.ql-editor ol li.ql-indent-7{counter-increment:list-7;counter-reset:list-8 list-9}.ql-editor ol li.ql-indent-7::before{content:counter(list-7,lower-alpha) ". "}.ql-editor ol li.ql-indent-8{counter-increment:list-8;counter-reset:list-9}.ql-editor ol li.ql-indent-8::before{content:counter(list-8,lower-roman) ". "}.ql-editor ol li.ql-indent-9{counter-increment:list-9}.ql-editor ol li.ql-indent-9::before{content:counter(list-9,decimal) ". "}';
 
 	/**
 	 * Dashboard widget entries data.
@@ -77,6 +89,9 @@ class Admin {
 		add_action( 'admin_menu', [ $this, 'add_new_form' ] );
 		add_action( 'admin_menu', [ $this, 'add_suremail_page' ] );
 		if ( ! Helper::has_pro() ) {
+			add_action( 'admin_menu', [ $this, 'add_quiz_page' ] );
+			add_action( 'admin_menu', [ $this, 'add_survey_reports_page' ] );
+			add_action( 'admin_menu', [ $this, 'add_partial_entries_page' ] );
 			add_action( 'admin_menu', [ $this, 'add_upgrade_to_pro' ] );
 			add_action( 'admin_footer', [ $this, 'add_upgrade_to_pro_target_attr' ] );
 		}
@@ -108,8 +123,6 @@ class Admin {
 			add_action( 'admin_menu', [ $this, 'maybe_add_entries_badge' ], 99 );
 		}
 
-		add_action( 'admin_menu', [ $this, 'add_payments_badge' ], 99 );
-
 		add_filter( 'wpforms_current_user_can', [ $this, 'disable_wpforms_capabilities' ], 10, 3 );
 
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin_pointer' ] );
@@ -118,14 +131,91 @@ class Admin {
 		add_action( 'wp_ajax_sureforms_dismiss_pointer', [ $this, 'pointer_dismissed' ] );
 		add_action( 'wp_ajax_sureforms_accept_cta', [ $this, 'pointer_accepted_cta' ] );
 		add_action( 'wp_ajax_srfm_notice_response', [ $this, 'handle_notice_response' ] );
+		add_action( 'wp_ajax_srfm_ai_widget_usage', [ $this, 'track_ai_widget_usage' ] );
 
 		// Register dashboard widget only if there are recent entries.
 		add_action( 'admin_init', [ $this, 'maybe_register_dashboard_widget' ] );
+
+		// Enqueue the AI quick draft widget script on the dashboard screen.
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_ai_dashboard_widget_assets' ] );
 
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
 		add_action( 'admin_notices', [ $this, 'display_srfm_rating_notice' ] );
 		add_action( 'admin_notices', [ $this, 'display_srfm_getting_started_notice' ] );
+
+		/**
+		 * Suppress foreign (third-party) admin notices on SureForms admin screens.
+		 *
+		 * Some plugins (e.g. Ninja Forms) print large promotional banners on every
+		 * admin page via the admin_notices / all_admin_notices / network_admin_notices
+		 * hooks. These bleed onto SureForms' own React admin screens and break the UI.
+		 * We run at the EARLIEST priority on each notice hook (all third-party
+		 * callbacks are registered before these hooks fire, during admin_init /
+		 * plugin load) and strip the foreign ones before they are echoed, while
+		 * preserving SureForms' own notices. Scoped strictly to SureForms screens.
+		 */
+		add_action( 'admin_notices', [ $this, 'suppress_foreign_admin_notices' ], PHP_INT_MIN );
+		add_action( 'all_admin_notices', [ $this, 'suppress_foreign_admin_notices' ], PHP_INT_MIN );
+		add_action( 'network_admin_notices', [ $this, 'suppress_foreign_admin_notices' ], PHP_INT_MIN );
+	}
+
+	/**
+	 * Remove third-party admin notices on SureForms admin screens.
+	 *
+	 * Iterates over the callbacks registered on the admin notice hooks and
+	 * removes any that are not owned by SureForms. A callback is considered
+	 * owned by SureForms when it belongs to a class in the `SRFM` / `SRFM_PRO`
+	 * namespaces or to the bundled `BSF_Admin_Notices` / `Astra_Notices`
+	 * notices library. SureForms' own notices are therefore preserved while
+	 * foreign promotional banners are suppressed.
+	 *
+	 * This callback is hooked at `PHP_INT_MIN` so that it runs first on each
+	 * notice hook and removes the foreign callbacks before WordPress echoes
+	 * them (WP_Hook honours removals made during iteration). It is strictly
+	 * scoped to SureForms admin screens via {@see Helper::is_sureforms_admin_page()}
+	 * so no other admin page is affected.
+	 *
+	 * @since 2.10.0
+	 * @return void
+	 */
+	public function suppress_foreign_admin_notices() {
+		// Bail early if we are not on a SureForms admin screen. This keeps the
+		// suppression strictly scoped and avoids touching any other admin page.
+		// is_sureforms_admin_page() covers the core screens (dashboard, add-new,
+		// settings, entries, the form CPT); we additionally match any admin page
+		// whose `page` slug is SureForms-owned (sureforms_* / srfm_*) so the
+		// suppression also applies to the payments/quiz/survey/learn/SMTP screens.
+		if ( ! Helper::is_sureforms_admin_page() && ! $this->is_sureforms_owned_admin_page() ) {
+			return;
+		}
+
+		global $wp_filter;
+
+		// The hook currently being fired (admin_notices, all_admin_notices or network_admin_notices).
+		$current_hook = current_action();
+
+		if ( empty( $current_hook ) || empty( $wp_filter[ $current_hook ] ) || ! ( $wp_filter[ $current_hook ] instanceof \WP_Hook ) ) {
+			return;
+		}
+
+		foreach ( $wp_filter[ $current_hook ]->callbacks as $priority => $callbacks ) {
+			foreach ( $callbacks as $callback ) {
+				$function = $callback['function'] ?? null;
+
+				// Never remove our own suppression callback.
+				if ( is_array( $function ) && isset( $function[0] ) && $function[0] === $this && 'suppress_foreign_admin_notices' === $function[1] ) {
+					continue;
+				}
+
+				// Preserve SureForms-owned notices, remove everything else.
+				if ( $this->is_sureforms_owned_notice_callback( $function ) ) {
+					continue;
+				}
+
+				remove_action( $current_hook, $function, $priority );
+			}
+		}
 	}
 
 	/**
@@ -231,12 +321,7 @@ class Admin {
 	public function add_action_links( $links ) {
 		if ( ! Helper::has_pro() ) {
 			// Display upsell link if SureForms Pro is not installed.
-			$upsell_link = add_query_arg(
-				[
-					'utm_medium' => 'plugin-list',
-				],
-				Helper::get_sureforms_website_url( 'pricing' )
-			);
+			$upsell_link = Helper::get_sureforms_website_url( 'pricing', [ 'utm_medium' => 'plugin-list' ] );
 
 			ob_start();
 			?>
@@ -398,12 +483,7 @@ class Admin {
 	public function add_upgrade_to_pro() {
 		// The url used here is used as a selector for css to style the upgrade to pro submenu.
 		// If you are changing this url, please make sure to update the css as well.
-		$upgrade_url = add_query_arg(
-			[
-				'utm_medium' => 'submenu_link_upgrade',
-			],
-			Helper::get_sureforms_website_url( 'upgrade' )
-		);
+		$upgrade_url = Helper::get_sureforms_website_url( 'upgrade', [ 'utm_medium' => 'submenu_link_upgrade' ] );
 
 		add_submenu_page(
 			'sureforms_menu',
@@ -412,6 +492,105 @@ class Admin {
 			self::$sureforms_page_default_capability,
 			$upgrade_url
 		);
+	}
+
+	/**
+	 * Add Quiz empty state submenu page for free users.
+	 *
+	 * @return void
+	 * @since 2.7.0
+	 */
+	public function add_quiz_page() {
+		add_submenu_page(
+			'sureforms_menu',
+			__( 'Quiz Entries', 'sureforms' ),
+			__( 'Quizzes', 'sureforms' ) .
+				' <span style="color:#4ADE80;font-size:9px;font-weight:600;">' .
+				esc_html__( 'New', 'sureforms' ) .
+				'</span>',
+			self::$sureforms_page_default_capability,
+			'sureforms_quiz_entries',
+			[ $this, 'render_quiz_empty_state' ],
+			5
+		);
+	}
+
+	/**
+	 * Quiz empty state page callback.
+	 *
+	 * @return void
+	 * @since 2.7.0
+	 */
+	public function render_quiz_empty_state() {
+		?>
+		<div id="srfm-quiz-entries-root" class="srfm-admin-wrapper"></div>
+		<?php
+	}
+
+	/**
+	 * Add Survey Reports promotional submenu page for free users.
+	 *
+	 * @return void
+	 * @since 2.8.0
+	 */
+	public function add_survey_reports_page() {
+		add_submenu_page(
+			'sureforms_menu',
+			__( 'Survey Reports', 'sureforms' ),
+			__( 'Survey Reports', 'sureforms' ) .
+				' <span style="color:#4ADE80;font-size:9px;font-weight:600;">' .
+				esc_html__( 'New', 'sureforms' ) .
+				'</span>',
+			self::$sureforms_page_default_capability,
+			'sureforms_survey_reports',
+			[ $this, 'render_survey_empty_state' ],
+			6
+		);
+	}
+
+	/**
+	 * Survey empty state page callback.
+	 *
+	 * @return void
+	 * @since 2.8.0
+	 */
+	public function render_survey_empty_state() {
+		?>
+		<div id="srfm-survey-empty-state-root" class="srfm-admin-wrapper"></div>
+		<?php
+	}
+
+	/**
+	 * Add Partial Entries promotional submenu page for free users.
+	 *
+	 * @return void
+	 * @since 2.9.0
+	 */
+	public function add_partial_entries_page() {
+		add_submenu_page(
+			'sureforms_menu',
+			__( 'Partial Entries', 'sureforms' ),
+			__( 'Partial Entries', 'sureforms' ) .
+				' <span style="color:#4ADE80;font-size:9px;font-weight:600;">' .
+				esc_html__( 'New', 'sureforms' ) .
+				'</span>',
+			self::$sureforms_page_default_capability,
+			'sureforms_partial_entries',
+			[ $this, 'render_partial_entries_empty_state' ],
+			7
+		);
+	}
+
+	/**
+	 * Partial Entries empty state page callback.
+	 *
+	 * @return void
+	 * @since 2.9.0
+	 */
+	public function render_partial_entries_empty_state() {
+		?>
+		<div id="srfm-partial-entries-empty-state-root" class="srfm-admin-wrapper"></div>
+		<?php
 	}
 
 	/**
@@ -662,34 +841,6 @@ class Admin {
 	}
 
 	/**
-	 * Summary of add_payments_badge
-	 *
-	 * @since 2.0.0
-	 * @return void
-	 */
-	public function add_payments_badge() {
-		if ( ! Helper::current_user_can() ) {
-			return;
-		}
-
-		global $submenu;
-		if ( isset( $submenu['sureforms_menu'] ) ) {
-			foreach ( $submenu['sureforms_menu'] as $index => $sub_item ) {
-				if ( isset( $sub_item[2] ) && SRFM_PAYMENTS === $sub_item[2] ) {
-					ob_start();
-					?>
-					<span style="color: #4ADE80;font-size: 9px;font-weight: 600;"><?php echo esc_html__( 'New', 'sureforms' ); ?></span>
-					<?php
-					$new_badge_html = ob_get_clean();
-					// phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Adding notifications for submenu item.
-					$submenu['sureforms_menu'][ $index ][0] .= $new_badge_html;
-					break;
-				}
-			}
-		}
-	}
-
-	/**
 	 * Mark the user's visit to the entries page.
 	 *
 	 * @since 1.7.3
@@ -758,6 +909,7 @@ class Admin {
 			wp_enqueue_style( SRFM_SLUG . '-intl', $vendor_css_uri . 'intl/intlTelInput-backend.min.css', [], SRFM_VER );
 			wp_enqueue_style( SRFM_SLUG . '-common', $css_uri . 'common' . $file_prefix . '.css', [], SRFM_VER );
 			wp_enqueue_style( SRFM_SLUG . '-reactQuill', $vendor_css_uri . 'quill/quill.snow.css', [], SRFM_VER );
+			wp_add_inline_style( SRFM_SLUG . '-reactQuill', self::QUILL_1X_INLINE_CSS );
 			wp_enqueue_style( SRFM_SLUG . '-single-form-modal', $css_uri . 'single-form-setting' . $file_prefix . '.css', [], SRFM_VER );
 
 			// if version is equal to or lower than 6.6.2 then add compatibility css.
@@ -847,38 +999,57 @@ class Admin {
 		 */
 		$script_translations_handlers = [];
 		$onboarding_instance          = Onboarding::get_instance();
+		$current_user                 = wp_get_current_user();
 
 		$localization_data = [
-			'site_url'                   => get_site_url(),
-			'breadcrumbs'                => $this->get_breadcrumbs_for_current_page(),
-			'sureforms_dashboard_url'    => admin_url( '/admin.php?page=sureforms_menu' ),
-			'plugin_version'             => SRFM_VER,
-			'global_settings_nonce'      => Helper::current_user_can() ? wp_create_nonce( 'wp_rest' ) : '',
-			'is_pro_active'              => Helper::has_pro(),
-			'is_first_form_created'      => self::is_first_form_created(),
-			'check_three_days_threshold' => self::check_first_form_creation_threshold(),
-			'check_eight_days_threshold' => self::check_first_form_creation_threshold( 8 ),
-			'pro_plugin_version'         => Helper::has_pro() ? SRFM_PRO_VER : '',
-			'pro_plugin_name'            => Helper::has_pro() && defined( 'SRFM_PRO_PRODUCT' ) ? SRFM_PRO_PRODUCT : 'SureForms Pro',
-			'sureforms_pricing_page'     => Helper::get_sureforms_website_url( 'pricing' ),
-			'field_spacing_vars'         => Helper::get_css_vars(),
-			'is_ver_lower_than_6_7'      => version_compare( $wp_version, '6.6.2', '<=' ),
-			'integrations'               => Helper::sureforms_get_integration(),
-			'rotating_plugin_banner'     => Helper::get_rotating_plugin_banner(),
-			'ajax_url'                   => admin_url( 'admin-ajax.php' ),
-			'sf_plugin_manager_nonce'    => wp_create_nonce( 'sf_plugin_manager_nonce' ),
-			'plugin_installer_nonce'     => wp_create_nonce( 'updates' ),
-			'plugin_activating_text'     => __( 'Activating...', 'sureforms' ),
-			'plugin_activated_text'      => __( 'Activated', 'sureforms' ),
-			'plugin_activate_text'       => __( 'Activate', 'sureforms' ),
-			'plugin_installing_text'     => __( 'Installing...', 'sureforms' ),
-			'plugin_installed_text'      => __( 'Installed', 'sureforms' ),
-			'is_rtl'                     => $is_rtl,
-			'onboarding_completed'       => method_exists( $onboarding_instance, 'get_onboarding_status' ) ? $onboarding_instance->get_onboarding_status() : false,
-			'onboarding_redirect'        => isset( $_GET['srfm-activation-redirect'] ), // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce is not required for the activation redirection.
-			'pointer_nonce'              => wp_create_nonce( 'sureforms_pointer_action' ),
-			'general_settings_url'       => admin_url( '/options-general.php' ),
-			'payments'                   => apply_filters(
+			'site_url'                     => get_site_url(),
+			'current_user_login'           => $current_user->user_login ?? '',
+			'website_lead_details'         => [
+				'first_name' => $current_user->first_name ?? '',
+				'last_name'  => $current_user->last_name ?? '',
+				'email'      => $current_user->user_email ?? '',
+			],
+			'breadcrumbs'                  => $this->get_breadcrumbs_for_current_page(),
+			'sureforms_dashboard_url'      => admin_url( '/admin.php?page=sureforms_menu' ),
+			'plugin_version'               => SRFM_VER,
+			'global_settings_nonce'        => Helper::current_user_can() ? wp_create_nonce( 'wp_rest' ) : '',
+			'is_pro_active'                => Helper::has_pro(),
+			'is_first_form_created'        => self::is_first_form_created(),
+			'check_three_days_threshold'   => self::check_first_form_creation_threshold(),
+			'check_eight_days_threshold'   => self::check_first_form_creation_threshold( 8 ),
+			'pro_plugin_version'           => Helper::has_pro() ? SRFM_PRO_VER : '',
+			'pro_plugin_name'              => Helper::has_pro() && defined( 'SRFM_PRO_PRODUCT' ) ? SRFM_PRO_PRODUCT : 'SureForms Pro',
+			'sureforms_pricing_page'       => Helper::get_sureforms_website_url( 'pricing' ),
+			'field_spacing_vars'           => Helper::get_css_vars(),
+			'is_ver_lower_than_6_7'        => version_compare( $wp_version, '6.6.2', '<=' ),
+			'integrations'                 => Helper::sureforms_get_integration(),
+			'rotating_plugin_banner'       => Helper::get_rotating_plugin_banner(),
+			'ajax_url'                     => admin_url( 'admin-ajax.php' ),
+			'sf_plugin_manager_nonce'      => wp_create_nonce( 'sf_plugin_manager_nonce' ),
+			'plugin_installer_nonce'       => wp_create_nonce( 'updates' ),
+			'plugin_activating_text'       => __( 'Activating...', 'sureforms' ),
+			'plugin_activated_text'        => __( 'Activated', 'sureforms' ),
+			'plugin_activate_text'         => __( 'Activate', 'sureforms' ),
+			'plugin_installing_text'       => __( 'Installing...', 'sureforms' ),
+			'plugin_installed_text'        => __( 'Installed', 'sureforms' ),
+			'privacy_policy_url'           => Helper::get_sureforms_website_url( 'privacy-policy/' ),
+			'is_rtl'                       => $is_rtl,
+			'onboarding_completed'         => method_exists( $onboarding_instance, 'get_onboarding_status' ) ? $onboarding_instance->get_onboarding_status() : false,
+			'migration_banner_dismissed'   => method_exists( $onboarding_instance, 'is_migration_banner_dismissed' ) ? $onboarding_instance->is_migration_banner_dismissed() : false,
+			'migration_settings_url'       => admin_url( 'admin.php?page=sureforms_form_settings&tab=migration-settings' ),
+			'onboarding_redirect'          => isset( $_GET['srfm-activation-redirect'] ), // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce is not required for the activation redirection.
+			'pointer_nonce'                => wp_create_nonce( 'sureforms_pointer_action' ),
+			'general_settings_url'         => admin_url( '/options-general.php' ),
+			'additional_header_nav_items'  => [],
+			// Smart tags for the Global Defaults email notification fields.
+			// srfm_block_data is only available in the block editor; these keys
+			// make the same data accessible on the settings page via srfm_admin.
+			'smart_tags_array'             => Smart_Tags::smart_tag_list(),
+			'smart_tags_array_email'       => Smart_Tags::email_smart_tag_list(),
+			// Default confirmation message HTML (icon + heading + text) used as
+			// the initial React state before the settings API response arrives.
+			'default_confirmation_message' => Global_Settings::get_default_confirmation_message(),
+			'payments'                     => apply_filters(
 				'srfm_admin_localize_payments_data',
 				[
 					'stripe_connected'        => Stripe_Helper::is_stripe_connected(),
@@ -894,16 +1065,23 @@ class Admin {
 					'currency_sign_position'  => Payment_Helper::get_currency_sign_position(),
 				]
 			),
+			'mcp_adapter_status'           => file_exists( WP_PLUGIN_DIR . '/mcp-adapter/mcp-adapter.php' )
+				? ( is_plugin_active( 'mcp-adapter/mcp-adapter.php' ) ? 'active' : 'installed' )
+				: 'not_installed',
+			'mcp_endpoint_url'             => esc_url_raw( rest_url( 'sureforms/v1/mcp' ) ),
 		];
 
-		$is_screen_sureforms_menu          = Helper::validate_request_context( 'sureforms_menu', 'page' );
-		$is_screen_add_new_form            = Helper::validate_request_context( 'add-new-form', 'page' );
-		$is_screen_sureforms_forms         = Helper::validate_request_context( 'sureforms_forms', 'page' );
-		$is_screen_sureforms_form_settings = Helper::validate_request_context( 'sureforms_form_settings', 'page' );
-		$is_screen_sureforms_payments      = Helper::validate_request_context( 'sureforms_payments', 'page' );
-		$is_screen_sureforms_entries       = Helper::validate_request_context( SRFM_ENTRIES, 'page' );
-		$is_screen_sureforms_learn         = Helper::validate_request_context( 'sureforms_learn', 'page' );
-		$is_post_type_sureforms_form       = SRFM_FORMS_POST_TYPE === $current_screen->post_type;
+		$is_screen_sureforms_menu              = Helper::validate_request_context( 'sureforms_menu', 'page' );
+		$is_screen_add_new_form                = Helper::validate_request_context( 'add-new-form', 'page' );
+		$is_screen_sureforms_forms             = Helper::validate_request_context( 'sureforms_forms', 'page' );
+		$is_screen_sureforms_form_settings     = Helper::validate_request_context( 'sureforms_form_settings', 'page' );
+		$is_screen_sureforms_payments          = Helper::validate_request_context( 'sureforms_payments', 'page' );
+		$is_screen_sureforms_entries           = Helper::validate_request_context( SRFM_ENTRIES, 'page' );
+		$is_screen_sureforms_learn             = Helper::validate_request_context( 'sureforms_learn', 'page' );
+		$is_screen_quiz_empty_state            = Helper::validate_request_context( 'sureforms_quiz_entries', 'page' );
+		$is_screen_survey_empty_state          = Helper::validate_request_context( 'sureforms_survey_reports', 'page' );
+		$is_screen_partial_entries_empty_state = Helper::validate_request_context( 'sureforms_partial_entries', 'page' );
+		$is_post_type_sureforms_form           = SRFM_FORMS_POST_TYPE === $current_screen->post_type;
 
 		/**
 		 * Check if the current screen is the SureForms Menu and AI Auth Email is present then we will add user type as registered.
@@ -916,7 +1094,37 @@ class Admin {
 			];
 		}
 
-		if ( $is_screen_sureforms_menu || $is_post_type_sureforms_form || $is_screen_add_new_form || $is_screen_sureforms_forms || $is_screen_sureforms_form_settings || $is_screen_sureforms_entries || $is_screen_sureforms_payments || $is_screen_sureforms_learn ) {
+		// Add the Quizzes and Survey Reports nav items when pro is not active.
+		if ( ! Helper::has_pro() ) {
+			$localization_data['additional_header_nav_items'][] = [
+				'slug' => 'sureforms_quiz_entries',
+				'text' => __( 'Quizzes', 'sureforms' ),
+				'link' => admin_url( 'admin.php?page=sureforms_quiz_entries' ),
+			];
+			$localization_data['additional_header_nav_items'][] = [
+				'slug' => 'sureforms_survey_reports',
+				'text' => __( 'Survey Reports', 'sureforms' ),
+				'link' => admin_url( 'admin.php?page=sureforms_survey_reports' ),
+			];
+			$localization_data['additional_header_nav_items'][] = [
+				'slug' => 'sureforms_partial_entries',
+				'text' => __( 'Partial Entries', 'sureforms' ),
+				'link' => admin_url( 'admin.php?page=sureforms_partial_entries' ),
+			];
+		}
+
+		$is_sureforms_screen = $is_screen_sureforms_menu || $is_post_type_sureforms_form || $is_screen_add_new_form || $is_screen_sureforms_forms || $is_screen_sureforms_form_settings || $is_screen_sureforms_entries || $is_screen_sureforms_payments || $is_screen_sureforms_learn || $is_screen_quiz_empty_state || $is_screen_survey_empty_state || $is_screen_partial_entries_empty_state;
+
+		/**
+		 * Filter to allow extending the SureForms dashboard screen check.
+		 *
+		 * @since 2.6.0
+		 *
+		 * @param bool $is_sureforms_screen Whether the current screen is a SureForms dashboard screen.
+		 */
+		$is_sureforms_screen = apply_filters( 'srfm_is_dashboard_screen', $is_sureforms_screen );
+
+		if ( $is_sureforms_screen ) {
 			$asset_handle = '-dashboard';
 
 			wp_enqueue_style( SRFM_SLUG . $asset_handle . '-font', 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap', [], SRFM_VER );
@@ -1061,6 +1269,60 @@ class Admin {
 			$script_translations_handlers[] = SRFM_SLUG . '-suremail';
 		}
 
+		// Enqueue scripts for the Quiz empty state page (free users only).
+		if ( $is_screen_quiz_empty_state && ! Helper::has_pro() ) {
+			$asset_handle = 'quizEmptyState';
+
+			$script_asset_path = SRFM_DIR . 'assets/build/' . $asset_handle . '.asset.php';
+			$script_info       = file_exists( $script_asset_path )
+				? include $script_asset_path
+				: [
+					'dependencies' => [],
+					'version'      => SRFM_VER,
+				];
+
+			wp_enqueue_script( SRFM_SLUG . '-quiz-empty-state', SRFM_URL . 'assets/build/' . $asset_handle . '.js', $script_info['dependencies'], SRFM_VER, true );
+			wp_enqueue_style( SRFM_SLUG . '-quiz-empty-state', SRFM_URL . 'assets/build/' . $asset_handle . '.css', [], SRFM_VER, 'all' );
+
+			$script_translations_handlers[] = SRFM_SLUG . '-quiz-empty-state';
+		}
+
+		// Enqueue scripts for the Survey Reports empty state page (free users only).
+		if ( $is_screen_survey_empty_state && ! Helper::has_pro() ) {
+			$asset_handle = 'surveyEmptyState';
+
+			$script_asset_path = SRFM_DIR . 'assets/build/' . $asset_handle . '.asset.php';
+			$script_info       = file_exists( $script_asset_path )
+				? include $script_asset_path
+				: [
+					'dependencies' => [],
+					'version'      => SRFM_VER,
+				];
+
+			wp_enqueue_script( SRFM_SLUG . '-survey-empty-state', SRFM_URL . 'assets/build/' . $asset_handle . '.js', $script_info['dependencies'], SRFM_VER, true );
+			wp_enqueue_style( SRFM_SLUG . '-survey-empty-state', SRFM_URL . 'assets/build/' . $asset_handle . '.css', [], SRFM_VER, 'all' );
+
+			$script_translations_handlers[] = SRFM_SLUG . '-survey-empty-state';
+		}
+
+		// Enqueue scripts for the Partial Entries empty state page (free users only).
+		if ( $is_screen_partial_entries_empty_state && ! Helper::has_pro() ) {
+			$asset_handle = 'partialEntriesEmptyState';
+
+			$script_asset_path = SRFM_DIR . 'assets/build/' . $asset_handle . '.asset.php';
+			$script_info       = file_exists( $script_asset_path )
+				? include $script_asset_path
+				: [
+					'dependencies' => [],
+					'version'      => SRFM_VER,
+				];
+
+			wp_enqueue_script( SRFM_SLUG . '-partial-entries-empty-state', SRFM_URL . 'assets/build/' . $asset_handle . '.js', $script_info['dependencies'], SRFM_VER, true );
+			wp_enqueue_style( SRFM_SLUG . '-partial-entries-empty-state', SRFM_URL . 'assets/build/' . $asset_handle . '.css', [], SRFM_VER, 'all' );
+
+			$script_translations_handlers[] = SRFM_SLUG . '-partial-entries-empty-state';
+		}
+
 		// Admin Submenu Styles.
 		wp_enqueue_style( SRFM_SLUG . '-admin', $css_uri . 'backend/admin' . $file_prefix . $rtl . '.css', [], SRFM_VER );
 
@@ -1079,8 +1341,16 @@ class Admin {
 			wp_localize_script(
 				SRFM_SLUG . '-settings',
 				SRFM_SLUG . '_admin',
-				$localization_data
+				apply_filters(
+					SRFM_SLUG . '_admin_filter',
+					$localization_data
+				)
 			);
+
+			// Enqueue Tailwind and Quill editor styles for the settings page.
+			wp_enqueue_style( SRFM_SLUG . '-settings-build', SRFM_URL . 'assets/build/settings.css', [], SRFM_VER, 'all' );
+			wp_enqueue_style( SRFM_SLUG . '-reactQuill', SRFM_URL . 'assets/css/minified/deps/quill/quill.snow.css', [], SRFM_VER );
+			wp_add_inline_style( SRFM_SLUG . '-reactQuill', self::QUILL_1X_INLINE_CSS );
 
 			$script_translations_handlers[] = SRFM_SLUG . '-settings';
 		}
@@ -1386,7 +1656,7 @@ class Admin {
 				'message'                    => $this->build_notice_markup(
 					esc_html__( 'Amazing! SureForms is powering your forms and submissions - let\'s keep growing together!', 'sureforms' ),
 					esc_html__( 'If SureForms has been helpful, would you mind taking a moment to leave a 5-star review on WordPress.org?', 'sureforms' ),
-					esc_url( 'https://wordpress.org/support/plugin/sureforms/reviews/?filter=5#new-post' ),
+					esc_url( 'https://wordpress.org/support/plugin/sureforms/reviews/' ),
 					esc_html__( 'Rate SureForms', 'sureforms' ),
 					esc_html__( 'Maybe later', 'sureforms' ),
 					esc_html__( 'I already did', 'sureforms' ),
@@ -1517,7 +1787,7 @@ class Admin {
 		}
 
 		$event_name = $valid[ $notice_id ][ $button ];
-		Analytics_Events::track( $event_name, $button );
+		Analytics::events()->track( $event_name, $button );
 
 		wp_send_json_success();
 	}
@@ -1668,6 +1938,9 @@ class Admin {
 			return;
 		}
 
+		// Register the AI quick draft widget for capable users (the capability gate above applies); unlike the recent-entries widget below, it is not conditional on having entries.
+		add_action( 'wp_dashboard_setup', [ $this, 'register_ai_dashboard_widget' ] );
+
 		// Quick check if there are any entries in the last 7 days.
 		$seven_days_ago = strtotime( '-7 days' );
 		$total_entries  = Entries::get_entries_count_after( $seven_days_ago );
@@ -1701,6 +1974,178 @@ class Admin {
 			'normal',
 			'high'
 		);
+	}
+
+	/**
+	 * Register the AI quick draft dashboard widget.
+	 *
+	 * @return void
+	 * @since 2.12.1
+	 */
+	public function register_ai_dashboard_widget() {
+		wp_add_dashboard_widget(
+			'sureforms_ai_quick_draft',
+			__( 'SureForms AI Quick Draft', 'sureforms' ),
+			[ $this, 'render_ai_dashboard_widget' ],
+			null,
+			null,
+			'normal',
+			'high'
+		);
+	}
+
+	/**
+	 * Render AI quick draft dashboard widget content.
+	 *
+	 * @return void
+	 * @since 2.12.1
+	 */
+	public function render_ai_dashboard_widget() {
+		?>
+		<div class="srfm-ai-dashboard-widget">
+			<p>
+				<?php esc_html_e( 'Describe the form and let SureForms AI generate it for you.', 'sureforms' ); ?>
+			</p>
+			<label for="srfm-ai-dashboard-prompt" class="screen-reader-text">
+				<?php esc_html_e( 'Describe your form', 'sureforms' ); ?>
+			</label>
+			<textarea
+				id="srfm-ai-dashboard-prompt"
+				class="widefat"
+				rows="5"
+				maxlength="2000"
+				placeholder="<?php esc_attr_e( 'Example: Create a contact form with name, email, phone, and message fields.', 'sureforms' ); ?>"
+			></textarea>
+			<p style="margin-top:10px;margin-bottom:0;display:flex;align-items:center;gap:10px;">
+				<button type="button" class="button button-primary" id="srfm-ai-dashboard-generate" disabled>
+					<?php esc_html_e( 'Create New Form', 'sureforms' ); ?>
+				</button>
+				<span id="srfm-ai-dashboard-char-count" style="color:#646970;">0/2000</span>
+			</p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Enqueue the AI quick draft dashboard widget script on the dashboard screen.
+	 *
+	 * The widget's behavior lives here (attached via wp_add_inline_script) rather than as an
+	 * inline <script> in the render callback, so it passes Plugin Check and keeps server values
+	 * out of the markup. Server values are passed through wp_localize_script.
+	 *
+	 * @param string $hook_suffix The current admin page hook suffix.
+	 * @return void
+	 * @since 2.12.1
+	 */
+	public function enqueue_ai_dashboard_widget_assets( $hook_suffix ) {
+		// Only on the main dashboard, and only for capable users (matches the widget gate).
+		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
+			return;
+		}
+
+		// Register an inline-only handle (empty src) — the WordPress-core pattern for attaching
+		// localized data plus an inline script without shipping a separate asset file.
+		wp_register_script( 'srfm-ai-dashboard-widget', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-ai-dashboard-widget' );
+
+		wp_localize_script(
+			'srfm-ai-dashboard-widget',
+			'srfmAiDashboardWidget',
+			[
+				'redirectUrl'    => admin_url( 'admin.php?page=add-new-form' ),
+				'ajaxUrl'        => admin_url( 'admin-ajax.php' ),
+				'nonce'          => wp_create_nonce( 'srfm_ai_widget_usage' ),
+				'redirectingTxt' => __( 'Redirecting...', 'sureforms' ),
+			]
+		);
+
+		$inline_script = <<<'JS'
+( function () {
+	const config = window.srfmAiDashboardWidget || {};
+	const generateButton = document.getElementById( 'srfm-ai-dashboard-generate' );
+	const promptField = document.getElementById( 'srfm-ai-dashboard-prompt' );
+	const charCount = document.getElementById( 'srfm-ai-dashboard-char-count' );
+	if ( ! generateButton || ! promptField ) {
+		return;
+	}
+
+	const updateWidgetState = function () {
+		const promptValue = promptField.value.trim();
+		generateButton.disabled = ! promptValue;
+		if ( charCount ) {
+			charCount.textContent = `${ promptField.value.length }/2000`;
+		}
+	};
+
+	const triggerGeneration = function () {
+		const prompt = promptField.value.trim();
+		if ( ! prompt ) {
+			promptField.focus();
+			return;
+		}
+
+		generateButton.disabled = true;
+		generateButton.textContent = config.redirectingTxt;
+
+		const redirectUrl = new URL( config.redirectUrl, window.location.origin );
+		redirectUrl.searchParams.set( 'srfm_ai_dashboard_prompt', prompt );
+
+		const requestBody = new URLSearchParams();
+		requestBody.append( 'action', 'srfm_ai_widget_usage' );
+		requestBody.append( 'nonce', config.nonce );
+
+		fetch( config.ajaxUrl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+			},
+			body: requestBody.toString(),
+		} ).finally( function () {
+			window.location.href = redirectUrl.toString();
+		} );
+	};
+
+	promptField.addEventListener( 'input', updateWidgetState );
+	generateButton.addEventListener( 'click', triggerGeneration );
+	promptField.addEventListener( 'keydown', function ( event ) {
+		if ( event.key === 'Enter' && ( event.metaKey || event.ctrlKey ) ) {
+			event.preventDefault();
+			triggerGeneration();
+		}
+	} );
+
+	updateWidgetState();
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-ai-dashboard-widget', $inline_script );
+	}
+
+	/**
+	 * Track AI dashboard widget usage.
+	 *
+	 * @return void
+	 * @since 2.12.1
+	 */
+	public function track_ai_widget_usage() {
+		if ( ! check_ajax_referer( 'srfm_ai_widget_usage', 'nonce', false ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+		}
+
+		if ( ! Helper::current_user_can() ) {
+			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+		}
+
+		$current_count = (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 ) + 1;
+		Helper::update_srfm_option( 'ai_dashboard_widget_uses', $current_count );
+
+		// Emit an analytics event so usage lands in the warehouse via events_record.
+		// $force = true because this is a cumulative counter, not a one-time event —
+		// it must re-send the latest count each cycle (bypasses one-time dedup).
+		Analytics::events()->track( 'ai_dashboard_widget_used', (string) $current_count, [], true );
+
+		wp_send_json_success();
 	}
 
 	/**
@@ -1751,6 +2196,63 @@ class Admin {
 			?>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Determine whether a notice callback is owned by SureForms.
+	 *
+	 * Recognises object methods on classes in the `SRFM` / `SRFM_PRO` namespaces
+	 * as well as the bundled notices libraries (`BSF_Admin_Notices` and the
+	 * legacy `Astra_Notices` alias). Everything else is treated as foreign.
+	 *
+	 * @param callable|array|string|null $function The registered callback function.
+	 * @since 2.10.0
+	 * @return bool True when the callback belongs to SureForms, false otherwise.
+	 */
+	private function is_sureforms_owned_notice_callback( $function ) {
+		$class_name = '';
+
+		if ( is_array( $function ) && isset( $function[0] ) ) {
+			// Object or static method callback represented as an array. The first
+			// element is either the object instance or the fully qualified class name.
+			$class_name = is_object( $function[0] ) ? get_class( $function[0] ) : (string) $function[0];
+		} elseif ( is_string( $function ) && false !== strpos( $function, '::' ) ) {
+			// Static method passed as "Class::method".
+			$class_name = strstr( $function, '::', true );
+		}
+
+		if ( '' === $class_name ) {
+			// Plain function callbacks are never owned by SureForms.
+			return false;
+		}
+
+		// SureForms (free and pro) namespaced classes. Pro's real namespace is
+		// `SRFM_Pro\` (case-sensitive) — not the all-caps `SRFM_PRO_` constant
+		// prefix — so match it case-insensitively to be safe.
+		if ( 0 === strpos( $class_name, 'SRFM\\' ) || 0 === stripos( $class_name, 'SRFM_Pro\\' ) ) {
+			return true;
+		}
+
+		// Bundled notices library shipped with SureForms.
+		return in_array( $class_name, [ 'BSF_Admin_Notices', 'Astra_Notices' ], true );
+	}
+
+	/**
+	 * Whether the current admin page is a SureForms-owned screen identified by a
+	 * `sureforms_*` / `srfm_*` `page` query slug. Complements
+	 * {@see Helper::is_sureforms_admin_page()} so foreign-notice suppression also
+	 * covers the payments / quiz / survey / learn / SMTP / partial-entries screens
+	 * that the core helper does not enumerate. Read-only screen check.
+	 *
+	 * @since 2.10.0
+	 * @return bool
+	 */
+	private function is_sureforms_owned_admin_page() {
+		if ( ! is_admin() || empty( $_GET['page'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only screen detection, no state change.
+			return false;
+		}
+		$page = sanitize_key( wp_unslash( $_GET['page'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only screen detection, no state change.
+		return 0 === strpos( $page, 'sureforms' ) || 0 === strpos( $page, 'srfm' );
 	}
 
 	/**
@@ -1895,12 +2397,7 @@ class Admin {
 					<span><?php echo esc_html( $this->get_random_premium_feature_text() ); ?></span>
 				</div>
 				<?php
-				$upgrade_url = add_query_arg(
-					[
-						'utm_medium' => 'dashboard-widget',
-					],
-					Helper::get_sureforms_website_url( 'pricing' )
-				);
+				$upgrade_url = Helper::get_sureforms_website_url( 'pricing', [ 'utm_medium' => 'dashboard-widget' ] );
 				?>
 				<a href="<?php echo esc_url( $upgrade_url ); ?>" class="srfm-upgrade-link" target="_blank">
 					<?php esc_html_e( 'Upgrade', 'sureforms' ); ?>

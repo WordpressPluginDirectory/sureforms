@@ -115,20 +115,41 @@ class Post_Types {
 	 * @since 1.7.3
 	 */
 	public function sureforms_normalize_meta_for_rest( $response, $post ) {
-		$meta_raw          = get_post_meta( $post->ID, '_srfm_form_confirmation', true );
-		$form_confirmation = maybe_unserialize( is_string( $meta_raw ) ? $meta_raw : '' );
+		$meta_raw = get_post_meta( $post->ID, '_srfm_form_confirmation', true );
+		// Meta may be a PHP array (new forms stored via update_post_meta with an array)
+		// or a serialized/JSON string (legacy forms). Handle both.
+		$form_confirmation = is_array( $meta_raw ) ? $meta_raw : maybe_unserialize( is_string( $meta_raw ) ? $meta_raw : '' );
 
 		if ( ! is_array( $form_confirmation ) ) {
 			return $response;
 		}
+
+		// Only normalize keys that extensions (e.g. SureForms Pro) have actually
+		// declared in the REST schema; otherwise REST PUT validation rejects them
+		// with "<key> is not a valid property of Object.".
+		$registered      = get_registered_meta_keys( 'post', SRFM_FORMS_POST_TYPE );
+		$item_properties = $registered['_srfm_form_confirmation']['show_in_rest']['schema']['items']['properties'] ?? [];
 
 		foreach ( $form_confirmation as $index => $item ) {
 			if ( ! is_array( $item ) ) {
 				continue;
 			}
 
-			$form_confirmation[ $index ]['hide_copy']         = ! empty( $item['hide_copy'] );
-			$form_confirmation[ $index ]['hide_download_all'] = ! empty( $item['hide_download_all'] );
+			if ( isset( $item_properties['hide_copy'] ) ) {
+				$form_confirmation[ $index ]['hide_copy'] = ! empty( $item['hide_copy'] );
+			}
+			if ( isset( $item_properties['hide_download_all'] ) ) {
+				$form_confirmation[ $index ]['hide_download_all'] = ! empty( $item['hide_download_all'] );
+			}
+
+			// DOMDocument::saveHTML() strips the "data:" prefix from data URIs in src attributes.
+			// Restore it so the editor displays SVG images correctly.
+			if ( isset( $item['message'] ) && is_string( $item['message'] ) && false !== strpos( $item['message'], 'src="image/svg+xml;base64' ) ) {
+				$normalized = preg_replace( '/src="image\/svg\+xml;base64/', 'src="data:image/svg+xml;base64', $item['message'] );
+				if ( is_string( $normalized ) ) {
+					$form_confirmation[ $index ]['message'] = $normalized;
+				}
+			}
 		}
 
 		$response_data = $response->get_data();
@@ -461,12 +482,33 @@ class Post_Types {
 			SRFM_FORMS_POST_TYPE,
 			'_srfm_instant_form_settings',
 			[
-				'single'        => true,
-				'type'          => 'object',
-				'auth_callback' => static function() {
+				'single'            => true,
+				'type'              => 'object',
+				'auth_callback'     => static function() {
 					return Helper::current_user_can();
 				},
-				'show_in_rest'  => [
+				'sanitize_callback' => static function( $meta_value ) {
+					if ( ! is_array( $meta_value ) ) {
+						return [];
+					}
+					return [
+						'site_logo'                     => isset( $meta_value['site_logo'] ) ? esc_url_raw( $meta_value['site_logo'] ) : '',
+						'site_logo_id'                  => isset( $meta_value['site_logo_id'] ) ? absint( $meta_value['site_logo_id'] ) : 0,
+						'cover_type'                    => isset( $meta_value['cover_type'] ) ? sanitize_text_field( $meta_value['cover_type'] ) : '',
+						'cover_color'                   => isset( $meta_value['cover_color'] ) ? sanitize_text_field( $meta_value['cover_color'] ) : '',
+						'cover_image'                   => isset( $meta_value['cover_image'] ) ? esc_url_raw( $meta_value['cover_image'] ) : '',
+						'cover_image_id'                => isset( $meta_value['cover_image_id'] ) ? absint( $meta_value['cover_image_id'] ) : 0,
+						'bg_type'                       => isset( $meta_value['bg_type'] ) ? sanitize_text_field( $meta_value['bg_type'] ) : '',
+						'bg_color'                      => isset( $meta_value['bg_color'] ) ? sanitize_text_field( $meta_value['bg_color'] ) : '',
+						'bg_image'                      => isset( $meta_value['bg_image'] ) ? esc_url_raw( $meta_value['bg_image'] ) : '',
+						'bg_image_id'                   => isset( $meta_value['bg_image_id'] ) ? absint( $meta_value['bg_image_id'] ) : 0,
+						'enable_instant_form'           => isset( $meta_value['enable_instant_form'] ) ? filter_var( $meta_value['enable_instant_form'], FILTER_VALIDATE_BOOLEAN ) : false,
+						'form_container_width'          => isset( $meta_value['form_container_width'] ) ? absint( $meta_value['form_container_width'] ) : 620,
+						'single_page_form_title'        => isset( $meta_value['single_page_form_title'] ) ? filter_var( $meta_value['single_page_form_title'], FILTER_VALIDATE_BOOLEAN ) : true,
+						'use_banner_as_page_background' => isset( $meta_value['use_banner_as_page_background'] ) ? filter_var( $meta_value['use_banner_as_page_background'], FILTER_VALIDATE_BOOLEAN ) : false,
+					];
+				},
+				'show_in_rest'      => [
 					'schema' => [
 						'type'       => 'object',
 						'context'    => [ 'edit' ],
@@ -518,7 +560,7 @@ class Post_Types {
 						],
 					],
 				],
-				'default'       => [
+				'default'           => [
 					'bg_type'                       => 'color',
 					'bg_color'                      => '#ffffff',
 					'bg_image'                      => '',
@@ -538,12 +580,15 @@ class Post_Types {
 			SRFM_FORMS_POST_TYPE,
 			'_srfm_forms_styling',
 			[
-				'single'        => true,
-				'type'          => 'object',
-				'auth_callback' => static function() {
+				'single'            => true,
+				'type'              => 'object',
+				'auth_callback'     => static function() {
 					return Helper::current_user_can();
 				},
-				'show_in_rest'  => [
+				'sanitize_callback' => static function( $meta_value ) {
+					return Helper::sanitize_by_type( $meta_value );
+				},
+				'show_in_rest'      => [
 					'schema' => [
 						'type'       => 'object',
 						'context'    => [ 'edit' ],
@@ -778,10 +823,14 @@ class Post_Types {
 							'instant_form_border_radius_link' => [
 								'type' => 'boolean',
 							],
+							// Disable default SureForms styling.
+							'disable_default_styles'      => [
+								'type' => 'boolean',
+							],
 						],
 					],
 				],
-				'default'       => [
+				'default'           => [
 					'primary_color'                     => '#111C44',
 					'text_color'                        => '#1E1E1E',
 					'text_color_on_primary'             => '#FFFFFF',
@@ -858,6 +907,8 @@ class Post_Types {
 					'instant_form_border_radius_left'   => 12,
 					'instant_form_border_radius_unit'   => 'px',
 					'instant_form_border_radius_link'   => true,
+					// Disable default SureForms styling.
+					'disable_default_styles'            => false,
 				],
 			]
 		);
@@ -867,12 +918,38 @@ class Post_Types {
 			'sureforms_form',
 			'_srfm_email_notification',
 			[
-				'single'        => true,
-				'type'          => 'array',
-				'auth_callback' => static function() {
+				'single'            => true,
+				'type'              => 'array',
+				'auth_callback'     => static function() {
 					return Helper::current_user_can();
 				},
-				'show_in_rest'  => [
+				'sanitize_callback' => static function( $meta_value ) {
+					if ( ! is_array( $meta_value ) ) {
+						return [];
+					}
+					$sanitized = [];
+					foreach ( $meta_value as $item ) {
+						if ( ! is_array( $item ) ) {
+							continue;
+						}
+						$sanitized[] = [
+							'id'             => isset( $item['id'] ) ? intval( $item['id'] ) : 0,
+							'status'         => isset( $item['status'] ) ? filter_var( $item['status'], FILTER_VALIDATE_BOOLEAN ) : false,
+							'is_raw_format'  => isset( $item['is_raw_format'] ) ? filter_var( $item['is_raw_format'], FILTER_VALIDATE_BOOLEAN ) : false,
+							'name'           => isset( $item['name'] ) ? sanitize_text_field( $item['name'] ) : '',
+							'email_to'       => isset( $item['email_to'] ) ? sanitize_text_field( $item['email_to'] ) : '',
+							'email_reply_to' => isset( $item['email_reply_to'] ) ? sanitize_text_field( $item['email_reply_to'] ) : '',
+							'from_name'      => isset( $item['from_name'] ) ? sanitize_text_field( $item['from_name'] ) : '',
+							'from_email'     => isset( $item['from_email'] ) ? sanitize_text_field( $item['from_email'] ) : '',
+							'email_cc'       => isset( $item['email_cc'] ) ? sanitize_text_field( $item['email_cc'] ) : '',
+							'email_bcc'      => isset( $item['email_bcc'] ) ? sanitize_text_field( $item['email_bcc'] ) : '',
+							'subject'        => isset( $item['subject'] ) ? sanitize_text_field( $item['subject'] ) : '',
+							'email_body'     => isset( $item['email_body'] ) ? wp_kses_post( $item['email_body'] ) : '',
+						];
+					}
+					return $sanitized;
+				},
+				'show_in_rest'      => [
 					'schema' => [
 						'type'    => 'array',
 						'context' => [ 'edit' ],
@@ -919,7 +996,7 @@ class Post_Types {
 						],
 					],
 				],
-				'default'       => [
+				'default'           => [
 					[
 						'id'             => 1,
 						'status'         => true,
@@ -943,12 +1020,31 @@ class Post_Types {
 			'sureforms_form',
 			'_srfm_compliance',
 			[
-				'single'        => true,
-				'type'          => 'array',
-				'auth_callback' => static function() {
+				'single'            => true,
+				'type'              => 'array',
+				'auth_callback'     => static function() {
 					return Helper::current_user_can();
 				},
-				'show_in_rest'  => [
+				'sanitize_callback' => static function( $meta_value ) {
+					if ( ! is_array( $meta_value ) ) {
+						return [];
+					}
+					$sanitized = [];
+					foreach ( $meta_value as $item ) {
+						if ( ! is_array( $item ) ) {
+							continue;
+						}
+						$sanitized[] = [
+							'id'                   => isset( $item['id'] ) ? sanitize_text_field( $item['id'] ) : '',
+							'gdpr'                 => isset( $item['gdpr'] ) ? filter_var( $item['gdpr'], FILTER_VALIDATE_BOOLEAN ) : false,
+							'do_not_store_entries' => isset( $item['do_not_store_entries'] ) ? filter_var( $item['do_not_store_entries'], FILTER_VALIDATE_BOOLEAN ) : false,
+							'auto_delete_entries'  => isset( $item['auto_delete_entries'] ) ? filter_var( $item['auto_delete_entries'], FILTER_VALIDATE_BOOLEAN ) : false,
+							'auto_delete_days'     => isset( $item['auto_delete_days'] ) ? sanitize_text_field( $item['auto_delete_days'] ) : '',
+						];
+					}
+					return $sanitized;
+				},
+				'show_in_rest'      => [
 					'schema' => [
 						'type'    => 'array',
 						'context' => [ 'edit' ],
@@ -974,7 +1070,7 @@ class Post_Types {
 						],
 					],
 				],
-				'default'       => [
+				'default'           => [
 					[
 						'id'                   => 'gdpr',
 						'gdpr'                 => false,
@@ -1016,7 +1112,7 @@ class Post_Types {
 							'confirmation_type'   => isset( $item['confirmation_type'] ) ? sanitize_text_field( $item['confirmation_type'] ) : '',
 							'page_url'            => isset( $item['page_url'] ) ? esc_url_raw( $item['page_url'] ) : '',
 							'custom_url'          => isset( $item['custom_url'] ) ? esc_url_raw( $item['custom_url'] ) : '',
-							'message'             => isset( $item['message'] ) ? Helper::strip_js_attributes( $item['message'] ) : '',
+							'message'             => isset( $item['message'] ) ? wp_kses_post( $item['message'] ) : '',
 							'submission_action'   => isset( $item['submission_action'] ) ? sanitize_text_field( $item['submission_action'] ) : '',
 							'enable_query_params' => isset( $item['enable_query_params'] ) ? filter_var( $item['enable_query_params'], FILTER_VALIDATE_BOOLEAN ) : false,
 							'query_params'        => isset( $item['query_params'] ) && is_array( $item['query_params'] )

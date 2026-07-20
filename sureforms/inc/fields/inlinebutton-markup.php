@@ -8,6 +8,7 @@
 
 namespace SRFM\Inc\Fields;
 
+use SRFM\Inc\Generate_Form_Markup;
 use SRFM\Inc\Helper;
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -207,7 +208,8 @@ class Inlinebutton_Markup extends Base {
 				if ( 'cf-turnstile' === $this->captcha_security_type ) {
 					if ( ! empty( $this->cf_turnstile_site_key ) ) {
 						// Cloudflare Turnstile script.
-						wp_enqueue_script( // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
+						// phpcs:disable WordPress.WP.EnqueuedResourceParameters.MissingVersion, PluginCheck.CodeAnalysis.EnqueuedResourceOffloading.OffloadedContent -- Cloudflare Turnstile must be loaded from Cloudflare's servers for token verification; the version is controlled by Cloudflare.
+						wp_enqueue_script(
 							SRFM_SLUG . '-cf-turnstile',
 							'https://challenges.cloudflare.com/turnstile/v0/api.js',
 							[],
@@ -217,18 +219,19 @@ class Inlinebutton_Markup extends Base {
 								'defer' => true,
 							]
 						);
+						// phpcs:enable WordPress.WP.EnqueuedResourceParameters.MissingVersion, PluginCheck.CodeAnalysis.EnqueuedResourceOffloading.OffloadedContent
 					} else {
 						Helper::render_missing_sitekey_error( 'Cloudflare Turnstile' );
 					}
 				}
 				if ( 'hcaptcha' === $this->captcha_security_type ) {
 					if ( ! empty( $this->hcaptcha_site_key ) ) {
-						wp_enqueue_script( 'hcaptcha', 'https://js.hcaptcha.com/1/api.js', [], null, [ 'strategy' => 'defer' ] ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
+						wp_enqueue_script( 'hcaptcha', 'https://js.hcaptcha.com/1/api.js', [], null, [ 'strategy' => 'defer' ] ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion, PluginCheck.CodeAnalysis.EnqueuedResourceOffloading.OffloadedContent -- hCaptcha must be loaded from hCaptcha's servers for token verification; the version is controlled by hCaptcha.
 					} else {
 						Helper::render_missing_sitekey_error( 'HCaptcha' );
 					}
 				}
-				$srfm_custom_button_classes = apply_filters( 'srfm_add_button_classes', [ 'v2-invisible' === $this->recaptcha_version || 'v3-reCAPTCHA' === $this->recaptcha_version ? 'g-recaptcha ' : '', '1' === $this->btn_from_theme ? 'wp-block-button__link' : 'srfm-button srfm-submit-button srfm-btn-frontend srfm-custom-button' ], $this->form_id );
+				$srfm_custom_button_classes = apply_filters( 'srfm_add_button_classes', [ 'v2-invisible' === $this->recaptcha_version || 'v3-reCAPTCHA' === $this->recaptcha_version ? 'g-recaptcha ' : '', '1' === $this->btn_from_theme ? 'wp-block-button__link' : 'srfm-button srfm-submit-button srfm-btn-frontend srfm-custom-button' ], $this->form_id, Generate_Form_Markup::get_current_block_attrs() );
 
 				$button_style  = $this->btn_from_theme ? '' : ' font-family: inherit; font-weight: var(--wp--custom--font-weight--medium); line-height: normal;';
 				$button_style .= 'width:100%;';
